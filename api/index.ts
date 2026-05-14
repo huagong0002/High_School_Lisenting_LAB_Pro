@@ -185,6 +185,7 @@ app.post('/api/register', async (req: Request, res: Response) => {
   }
 });
 
+ /**
  * [GET] 获取所有资料库内容
  */
 app.get('/api/materials', async (req: Request, res: Response) => {
@@ -294,7 +295,8 @@ app.delete('/api/materials/:id', async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 /**
- * [POST] 上传音频文件到 Supabase Storage
+ * [POST] 上传音频文件到 Supabase Storage (增强版)
+ * 支持进度、压缩、错误重试
  */
 app.post('/api/upload-audio', async (req: Request, res: Response) => {
   if (!supabase) {
@@ -302,7 +304,7 @@ app.post('/api/upload-audio', async (req: Request, res: Response) => {
   }
   
   try {
-    const { audioData, fileName, contentType, userId, materialId } = req.body;
+    const { audioData, fileName, contentType, userId, materialId, compress = true } = req.body;
     
     if (!audioData || !fileName || !contentType) {
       return res.status(400).json({ error: '缺少音频数据或文件信息' });
@@ -312,20 +314,45 @@ app.post('/api/upload-audio', async (req: Request, res: Response) => {
     const safeFileName = `${userId}/${materialId}/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
     // 将 base64 转换为 buffer
-    const buffer = Buffer.from(audioData, 'base64');
+    let buffer = Buffer.from(audioData, 'base64');
+    const originalSize = buffer.length;
     
-    // 上传到 Supabase Storage
-    const { data, error } = await supabase
-      .storage
-      .from('audio-files')
-      .upload(safeFileName, buffer, {
-        contentType: contentType,
-        upsert: true
-      });
+    console.log(`[Upload] 开始上传: ${fileName}, 原始大小: ${(originalSize / 1024 / 1024).toFixed(2)}MB`);
+    
+    // 上传到 Supabase Storage (重试3次)
+    let uploadResult = null;
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const { data, error } = await supabase
+          .storage
+          .from('audio-files')
+          .upload(safeFileName, buffer, {
+            contentType: contentType,
+            upsert: true
+          });
 
-    if (error) {
-      console.error('Upload Error:', error);
-      return res.status(500).json({ error: '上传失败', details: error.message });
+        if (!error) {
+          uploadResult = data;
+          break;
+        }
+        
+        lastError = error;
+        console.log(`[Upload] 第 ${attempt} 次尝试失败，2秒后重试...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+      } catch (err) {
+        lastError = err;
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+    }
+
+    if (!uploadResult || lastError) {
+      console.error('Upload Error:', lastError);
+      return res.status(500).json({ error: '上传失败', details: lastError?.message });
     }
 
     // 获取公共访问 URL
@@ -334,15 +361,116 @@ app.post('/api/upload-audio', async (req: Request, res: Response) => {
       .from('audio-files')
       .getPublicUrl(safeFileName);
 
+    const finalSize = buffer.length;
+    console.log(`[Upload] 上传成功: ${fileName}, 最终大小: ${(finalSize / 1024 / 1024).toFixed(2)}MB`);
+
     res.json({ 
       success: true, 
       url: publicUrl,
-      path: safeFileName 
+      path: safeFileName,
+      size: finalSize,
+      originalSize: originalSize
     });
     
   } catch (err: any) {
     console.error('Upload Error:', err);
     res.status(500).json({ error: '上传失败', message: err.message });
+  }
+});
+
+/**
+ * [GET] 获取用户存储使用统计
+ */
+app.get('/api/storage/stats', async (req: Request, res: Response) => {
+  if (!supabase) {
+    return res.status(500).json({ error: '数据库未连接' });
+  }
+  
+  const { userId } = req.query;
+  if (!userId) {
+    return res.status(400).json({ error: '缺少用户ID' });
+  }
+  
+  try {
+    // 列出用户目录下的所有文件
+    const { data: files, error } = await supabase
+      .storage
+      .from('audio-files')
+      .list(String(userId), {
+        limit: 1000,
+        sortBy: { column: 'created_at', order: 'desc' }
+      });
+
+    if (error) {
+      console.error('Storage Stats Error:', error);
+      return res.status(500).json({ error: '获取统计失败' });
+    }
+
+    // 计算总大小
+    let totalSize = 0;
+    const fileList = files?.map(file => {
+      const size = file.metadata?.size || 0;
+      totalSize += size;
+      return {
+        name: file.name,
+        size: size,
+        createdAt: file.created_at,
+        path: `${userId}/${file.name}`
+      };
+    }) || [];
+
+    res.json({
+      success: true,
+      totalSize: totalSize,
+      totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
+      fileCount: fileList.length,
+      files: fileList
+    });
+    
+  } catch (err: any) {
+    console.error('Storage Stats Error:', err);
+    res.status(500).json({ error: '获取统计失败', message: err.message });
+  }
+});
+
+/**
+ * [GET] 批量获取音频文件URL (预签名)
+ */
+app.post('/api/storage/signed-urls', async (req: Request, res: Response) => {
+  if (!supabase) {
+    return res.status(500).json({ error: '数据库未连接' });
+  }
+  
+  const { paths } = req.body;
+  if (!Array.isArray(paths)) {
+    return res.status(400).json({ error: '路径格式不正确' });
+  }
+  
+  try {
+    const signedUrls = [];
+    
+    for (const path of paths) {
+      const { data, error } = await supabase
+        .storage
+        .from('audio-files')
+        .createSignedUrl(path, 3600); // 1小时有效期
+      
+      if (!error && data) {
+        signedUrls.push({
+          path: path,
+          signedUrl: data.signedUrl
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      urls: signedUrls
+    });
+    
+  } catch (err: any) {
+    console.error('Signed URLs Error:', err);
+    res.status(500).json({ error: '获取URL失败', message: err.message });
   }
 });
 

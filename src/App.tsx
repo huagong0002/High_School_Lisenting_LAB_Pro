@@ -71,7 +71,7 @@ export default function App() {
   const [authData, setAuthData] = useState({ username: '', password: '', email: '' });
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [mode, setMode] = useState<'library' | 'setup' | 'edit' | 'train'>('library');
+  const [mode, setMode] = useState<'library' | 'setup' | 'edit' | 'train' | 'storage'>('library');
   const [currentMaterialId, setCurrentMaterialId] = useState<string | null>(null);
   const [materials, setMaterials] = useState<ListeningMaterial[]>([]);
   const [material, setMaterial] = useState<ListeningMaterial>({
@@ -468,20 +468,39 @@ export default function App() {
 
   const [editingSegmentIndex, setEditingSegmentIndex] = useState<number>(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: { progress: number; status: 'uploading' | 'success' | 'error' } }>({});
+  const [storageStats, setStorageStats] = useState<any>(null);
+
+  // 获取存储使用统计
+  const fetchStorageStats = async () => {
+    if (!user) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/storage/stats?userId=${user.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setStorageStats(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch storage stats:', e);
+    }
+  };
 
   // File Upload Handlers
-  // File Upload Handlers
-  // 上传音频到云端
+  // 上传音频到云端（增强版）
   const uploadAudioToCloud = async (file: File, materialId: string): Promise<string | null> => {
     if (!user) return null;
     
+    const uploadKey = materialId;
+    setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 10, status: 'uploading' } }));
+    
     try {
       // 转换为 base64（适用于 Vercel Serverless 环境）
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 30, status: 'uploading' } }));
+      
       const audioData = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
           const result = reader.result as string;
-          // 去掉 data:image/xxx;base64, 前缀
           const base64 = result.split(',')[1];
           resolve(base64);
         };
@@ -489,30 +508,61 @@ export default function App() {
         reader.readAsDataURL(file);
       });
 
-      const response = await fetch(`${API_BASE}/api/upload-audio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioData,
-          fileName: file.name,
-          contentType: file.type,
-          userId: user.id,
-          materialId
-        }),
-        mode: 'cors',
-        credentials: API_BASE ? 'include' : 'same-origin'
-      });
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 50, status: 'uploading' } }));
 
-      if (response.ok) {
-        const data = await response.json();
-        return data.url;
-      } else {
-        const err = await response.json();
-        console.error('Upload failed:', err);
-        return null;
+      // 上传到云端，支持3次重试
+      let lastError = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetch(`${API_BASE}/api/upload-audio`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              audioData,
+              fileName: file.name,
+              contentType: file.type,
+              userId: user.id,
+              materialId
+            }),
+            mode: 'cors',
+            credentials: API_BASE ? 'include' : 'same-origin'
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'success' } }));
+            
+            // 刷新存储统计
+            setTimeout(fetchStorageStats, 1000);
+            
+            return data.url;
+          } else {
+            const err = await response.json();
+            lastError = err;
+            console.error(`Upload attempt ${attempt} failed:`, err);
+            
+            if (attempt < 3) {
+              setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 50 + attempt * 10, status: 'uploading' } }));
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          }
+        } catch (e) {
+          lastError = e;
+          console.error(`Upload attempt ${attempt} failed:`, e);
+          if (attempt < 3) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
       }
+
+      // 所有尝试都失败
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
+      console.error('All upload attempts failed:', lastError);
+      return null;
+      
     } catch (e) {
       console.error('Upload error:', e);
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
       return null;
     }
   };
@@ -819,6 +869,18 @@ export default function App() {
                 >
                   <BookOpen size={20} /> 训练
                 </button>
+                <button 
+                  onClick={() => {
+                    fetchStorageStats();
+                    setMode('storage');
+                  }}
+                  className={cn(
+                    "px-6 py-3 text-base font-bold transition-all rounded-xl flex items-center gap-2",
+                    mode === 'storage' ? "bg-purple-600 text-white shadow-lg shadow-purple-600/20" : "btn-glass text-slate-300"
+                  )}
+                >
+                  <Folder size={20} /> 存储
+                </button>
               </nav>
             )}
 
@@ -1063,9 +1125,40 @@ export default function App() {
                         <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-inner">
                           <ListMusic size={28} />
                         </div>
-                        <span className="text-sm font-medium text-slate-300">
-                          {material.audioUrl ? "音频已成功上传 ✅" : "点击或拖拽上传音频"}
-                        </span>
+                        
+                        {/* 上传进度显示 */}
+                        {uploadProgress[material?.id]?.status === 'uploading' && (
+                          <div className="w-full space-y-2">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-blue-400">上传中...</span>
+                              <span className="text-slate-400">{uploadProgress[material?.id]?.progress}%</span>
+                            </div>
+                            <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                                style={{ width: `${uploadProgress[material?.id]?.progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        
+                        {uploadProgress[material?.id]?.status === 'error' && (
+                          <div className="w-full text-center">
+                            <p className="text-red-400 text-sm">上传失败，请重试</p>
+                          </div>
+                        )}
+                        
+                        {uploadProgress[material?.id]?.status === 'success' && (
+                          <div className="w-full text-center">
+                            <p className="text-green-400 text-sm">✅ 上传成功！</p>
+                          </div>
+                        )}
+                        
+                        {!uploadProgress[material?.id]?.status && (
+                          <span className="text-sm font-medium text-slate-300">
+                            {material.audioUrl ? "音频已成功上传 ✅" : "点击或拖拽上传音频"}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1592,6 +1685,108 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          )}
+
+          {mode === 'storage' && (
+            <motion.div 
+              key="storage"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-8"
+            >
+              {/* Storage Stats */}
+              <div className="glass p-8 rounded-[40px] border-white/10 shadow-2xl">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                      <Folder size={24} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold text-white">存储管理</h2>
+                      <p className="text-slate-400 text-sm">管理您上传的音频文件和存储空间</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={fetchStorageStats}
+                    className="btn-glass px-6 py-3 rounded-xl flex items-center gap-2 text-sm font-bold"
+                  >
+                    <RotateCcw size={16} /> 刷新
+                  </button>
+                </div>
+
+                {storageStats?.success ? (
+                  <>
+                    {/* Usage Overview */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                      <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
+                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">总存储空间</div>
+                        <div className="text-3xl font-black text-purple-400">{storageStats.totalSizeMB} MB</div>
+                      </div>
+                      <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
+                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">文件总数</div>
+                        <div className="text-3xl font-black text-blue-400">{storageStats.fileCount}</div>
+                      </div>
+                      <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
+                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">状态</div>
+                        <div className="text-lg font-bold text-green-400">正常</div>
+                      </div>
+                    </div>
+
+                    {/* File List */}
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-bold text-white">音频文件列表</h3>
+                      {storageStats.files?.length > 0 ? (
+                        <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar">
+                          {storageStats.files.map((file: any, idx: number) => (
+                            <div key={idx} className="bg-white/5 rounded-2xl p-5 border border-white/10 flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 bg-purple-600/20 rounded-xl flex items-center justify-center text-purple-400">
+                                  <FileAudio size={18} />
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white text-sm">{file.name}</div>
+                                  <div className="text-xs text-slate-500">
+                                    {(file.size / 1024 / 1024).toFixed(2)} MB · {file.createdAt}
+                                  </div>
+                                </div>
+                              </div>
+                              <button 
+                                className="p-2 text-slate-500 hover:text-red-400 transition-all rounded-lg hover:bg-red-500/10"
+                                title="删除文件"
+                                onClick={async () => {
+                                  try {
+                                    await fetch(`${API_BASE}/api/audio`, {
+                                      method: 'DELETE',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ path: file.path })
+                                    });
+                                    fetchStorageStats();
+                                  } catch (e) {
+                                    console.error('Delete failed', e);
+                                  }
+                                }}
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 text-slate-500">
+                          <Folder size={48} className="mx-auto mb-4 opacity-30" />
+                          <p>暂无上传的音频文件</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-12 text-slate-500">
+                    <p>加载存储信息中...</p>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

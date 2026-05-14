@@ -184,7 +184,7 @@ app.post('/api/register', async (req: Request, res: Response) => {
     return res.status(500).json({ error: '注册失败，请稍后重试' });
   }
 });
-
+/**
  * [GET] 获取所有资料库内容
  */
 app.get('/api/materials', async (req: Request, res: Response) => {

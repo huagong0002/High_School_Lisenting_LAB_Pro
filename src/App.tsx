@@ -494,7 +494,7 @@ export default function App() {
 
   // File Upload Handlers
   // 上传音频到云端（直接上传到 Supabase Storage，无文件大小限制）
-  const uploadAudioToCloud = async (file: File, materialId: string): Promise<string | null> => {
+  const uploadAudioToCloud = async (file: File, materialId: string, customName?: string): Promise<string | null> => {
     if (!user) {
       console.error('[Upload] 用户未登录');
       return null;
@@ -504,11 +504,21 @@ export default function App() {
     setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'uploading' } }));
     
     try {
-      // 生成唯一存储路径
-      const safeFileName = `${user.id}/${materialId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      // 获取文件扩展名
+      const ext = file.name.split('.').pop() || 'mp3';
+      
+      // 使用材料名称或自定义名称作为文件名
+      let baseName = customName || material?.title || 'audio';
+      // 清理文件名中的特殊字符
+      baseName = baseName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5-]/g, '_');
+      
+      // 生成友好的文件名：材料名_时间戳.扩展名
+      const fileName = `${baseName}_${Date.now()}.${ext}`;
+      const safeFileName = `${user.id}/${materialId}/${fileName}`;
       
       console.log(`[Upload] 开始上传: ${file.name}, 大小: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
       console.log(`[Upload] 存储路径: ${safeFileName}`);
+      console.log(`[Upload] 显示名称: ${fileName}`);
       
       // 直接上传到 Supabase Storage（绕过 Vercel 限制）
       const { data, error } = await supabaseClient
@@ -585,8 +595,8 @@ export default function App() {
     const localUrl = URL.createObjectURL(file);
     setMaterial(prev => ({ ...prev, audioUrl: localUrl }));
 
-    // 2. 上传到云端
-    const cloudUrl = await uploadAudioToCloud(file, material.id);
+    // 2. 上传到云端（使用材料标题作为文件名）
+    const cloudUrl = await uploadAudioToCloud(file, material.id, material.title);
     
     if (cloudUrl) {
       // 3. 更新为云端 URL

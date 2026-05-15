@@ -65,6 +65,10 @@ async function handleHealth() {
 async function handleLogin(body: any) {
   const { username, password } = body;
   
+  if (!username || !password) {
+    return { error: '用户名和密码不能为空' };
+  }
+  
   try {
     if (supabase) {
       const { data, error } = await supabase
@@ -77,10 +81,10 @@ async function handleLogin(body: any) {
       if (data) {
         const { password: _, ...userWithoutPassword } = data;
         return { success: true, user: {
-          id: userWithoutPassword.id,
+          id: String(userWithoutPassword.id),
           username: userWithoutPassword.username,
           email: userWithoutPassword.email,
-          role: userWithoutPassword.role
+          role: userWithoutPassword.role || 'user'
         }};
       }
     }
@@ -95,6 +99,85 @@ async function handleLogin(body: any) {
   }
   
   return { error: '用户名或密码错误' };
+}
+
+async function handleRegister(body: any) {
+  const { username, password, email } = body;
+  
+  if (!username || !password) {
+    return { error: '用户名和密码不能为空' };
+  }
+  
+  if (password.length < 6) {
+    return { error: '密码长度至少需要6位' };
+  }
+  
+  try {
+    if (supabase) {
+      const { data: existing, error: checkError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', username)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Check User Error:', checkError);
+        return { error: '检查用户失败' };
+      }
+
+      if (existing) {
+        return { error: '用户名已存在' };
+      }
+
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert({
+          username,
+          password,
+          email: email || null,
+          role: 'user',
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .maybeSingle();
+
+      if (insertError) {
+        console.error('Insert User Error:', insertError);
+        return { error: '注册失败，请重试' };
+      }
+
+      if (newUser) {
+        const { password: _, ...userWithoutPassword } = newUser;
+        return { success: true, user: {
+          id: String(userWithoutPassword.id),
+          username: userWithoutPassword.username,
+          email: userWithoutPassword.email,
+          role: userWithoutPassword.role || 'user'
+        }};
+      }
+    }
+  } catch (err) {
+    console.error('Register Error:', err);
+    return { error: '注册失败，请重试' };
+  }
+
+  const existingLocal = LOCAL_USERS.find(u => u.username === username);
+  if (existingLocal) {
+    return { error: '用户名已存在' };
+  }
+
+  const newLocalUser = {
+    id: String(Date.now()),
+    username,
+    password,
+    email: email || '',
+    role: 'user',
+    name: username
+  };
+  LOCAL_USERS.push(newLocalUser);
+  
+  const { password: _, ...userWithoutPassword } = newLocalUser;
+  return { success: true, user: userWithoutPassword };
 }
 
 async function handleGetMaterials(query: any) {
@@ -206,6 +289,39 @@ async function handleDeleteMaterial(params: any) {
   return { success: true };
 }
 
+async function handleDeleteAudio(body: any) {
+  const { path } = body;
+  
+  if (!path) {
+    return { error: '缺少文件路径' };
+  }
+  
+  if (!supabase) {
+    return { error: '数据库未连接' };
+  }
+  
+  try {
+    console.log(`[Delete Audio] 删除文件: ${path}`);
+    
+    const { error } = await supabase
+      .storage
+      .from('audio-files')
+      .remove([path]);
+    
+    if (error) {
+      console.error('Delete Audio Error:', error);
+      return { error: '删除失败', message: error.message };
+    }
+    
+    console.log(`[Delete Audio] 删除成功: ${path}`);
+    return { success: true };
+    
+  } catch (err: any) {
+    console.error('Delete Audio Error:', err);
+    return { error: '删除失败', message: err.message };
+  }
+}
+
 async function handleStorageStats(query: any) {
   if (!supabase) {
     console.error('Storage Stats Error: Supabase not connected');
@@ -285,29 +401,40 @@ export default async function handler(req: any, res: any) {
   
   console.log(`[${new Date().toISOString()}] ${method} ${url}`);
   
+  // 去掉查询参数，只匹配路径
+  const path = url.split('?')[0];
+  console.log(`[Router] 匹配路径: ${path}`);
+  
   let result: any;
   let statusCode = 200;
 
   try {
     const parsedBody = typeof body === 'string' || Buffer.isBuffer(body) ? parseBody(body) : body;
     
-    if (method === 'GET' && url === '/api/health') {
+    if (method === 'GET' && path === '/api/health') {
       result = await handleHealth();
-    } else if (method === 'POST' && url === '/api/login') {
+    } else if (method === 'POST' && path === '/api/login') {
       result = await handleLogin(parsedBody);
       if (result.error) statusCode = 401;
-    } else if (method === 'GET' && url.startsWith('/api/materials')) {
+    } else if (method === 'POST' && path === '/api/register') {
+      result = await handleRegister(parsedBody);
+      if (result.error) statusCode = 400;
+    } else if (method === 'GET' && path.startsWith('/api/materials')) {
       result = await handleGetMaterials(query);
-    } else if (method === 'POST' && url === '/api/materials/sync') {
+    } else if (method === 'POST' && path === '/api/materials/sync') {
       result = await handleSyncMaterials(parsedBody);
       if (result.error) statusCode = result.error.includes('缺少') ? 400 : 500;
-    } else if (method === 'DELETE' && url.startsWith('/api/materials/')) {
-      const id = url.split('/')[3];
+    } else if (method === 'DELETE' && path.startsWith('/api/materials/')) {
+      const id = path.split('/')[3];
       result = await handleDeleteMaterial({ id });
-    } else if (method === 'GET' && url.startsWith('/api/storage/stats')) {
+    } else if (method === 'DELETE' && path === '/api/audio') {
+      result = await handleDeleteAudio(parsedBody);
+      if (result.error) statusCode = 400;
+    } else if (method === 'GET' && path.startsWith('/api/storage/stats')) {
       result = await handleStorageStats(query);
       if (result.error) statusCode = result.error.includes('缺少') ? 400 : 500;
     } else {
+      console.log(`[Router] 未找到匹配路由: ${path}`);
       result = { error: 'Not Found' };
       statusCode = 404;
     }

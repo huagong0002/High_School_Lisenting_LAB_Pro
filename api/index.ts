@@ -62,9 +62,13 @@ let LOCAL_USERS: any[] = [
  */
 app.get('/api/health', async (req: Request, res: Response) => {
   let dbStatus = 'Not Attempted';
-  if (supabase) {
-    const { error } = await supabase.from('users').select('count', { count: 'exact', head: true });
-    dbStatus = error ? `Error: ${error.message}` : 'Connected';
+  try {
+    if (supabase) {
+      const { error } = await supabase.from('users').select('count', { count: 'exact', head: true });
+      dbStatus = error ? `Error: ${error.message}` : 'Connected';
+    }
+  } catch (err) {
+    dbStatus = `Exception: ${(err as Error).message}`;
   }
 
   res.json({
@@ -185,16 +189,28 @@ app.post('/api/register', async (req: Request, res: Response) => {
   }
 });
 
- /**
- * [GET] 获取所有资料库内容
+/**
+ * [GET] 获取资料库内容（支持按用户ID过滤）
  */
 app.get('/api/materials', async (req: Request, res: Response) => {
+  const userId = req.query.userId as string;
+  
   try {
     if (supabase) {
-      const { data, error } = await supabase
-        .from('materials')
-        .select('*')
-        .order('last_modified', { ascending: false });
+      let query = supabase.from('materials').select('*').order('last_modified', { ascending: false });
+      
+      // 如果提供了 userId 参数，按用户过滤
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error('Fetch Materials Error:', error);
+        // 如果数据库查询失败，返回空数组而不是错误
+        return res.json([]);
+      }
       
       if (data) {
         // Map database snake_case fields to frontend camelCase
@@ -209,7 +225,6 @@ app.get('/api/materials', async (req: Request, res: Response) => {
         }));
         return res.json(mappedData);
       }
-      if (error) throw error;
     }
   } catch (err) {
     console.error('Fetch Materials Error:', err);

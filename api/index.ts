@@ -563,5 +563,6 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-// 导出给 Vercel 使用
-export default app;
+// Vercel Serverless Function 导出
+const handler = app;
+export default handler;

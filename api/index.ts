@@ -339,15 +339,51 @@ async function handleStorageStats(query: any) {
     
     let totalSize = 0;
     const fileList: any[] = [];
-    const possibleUserIds = [String(userId)];
     
-    // 如果用户ID是长UUID格式，尝试用简化的ID
+    // 获取用户ID的简化版本（用于匹配文件名）
+    const simpleUserId = String(userId).replace(/-/g, '').slice(0, 8);
+    
+    console.log(`[Storage Stats] 简化用户ID: ${simpleUserId}`);
+    
+    // 1. 首先尝试读取根目录（新的存储方式）
+    const { data: rootFiles, error: rootError } = await supabase
+      .storage
+      .from('audio-files')
+      .list('');
+    
+    if (rootError) {
+      console.warn('Storage Stats Warning (list root):', rootError.message);
+    } else {
+      console.log(`[Storage Stats] 根目录找到 ${rootFiles?.length || 0} 个文件/文件夹`);
+      
+      if (rootFiles && rootFiles.length > 0) {
+        for (const item of rootFiles) {
+          // 检查是否是文件（文件名包含点且不以下划线开头）
+          if (item.name && item.name.includes('.') && !item.name.startsWith('_')) {
+            // 检查是否属于当前用户（文件名以用户ID开头）
+            if (item.name.startsWith(simpleUserId)) {
+              const size = item.metadata?.size || item.size || 0;
+              totalSize += size;
+              fileList.push({
+                name: item.name,
+                size: size,
+                createdAt: item.created_at || item.metadata?.created_at,
+                path: item.name
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    // 2. 尝试旧的目录结构（保持向后兼容）
+    const possibleUserIds = [String(userId)];
     if (userId.length > 10) {
       possibleUserIds.push('1', userId.slice(-5));
     }
 
     for (const uid of possibleUserIds) {
-      console.log(`[Storage Stats] 尝试用户ID: ${uid}`);
+      console.log(`[Storage Stats] 尝试用户目录: ${uid}`);
       
       const { data: folders, error: foldersError } = await supabase
         .storage

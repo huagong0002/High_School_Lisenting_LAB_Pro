@@ -482,13 +482,65 @@ export default function App() {
   const fetchStorageStats = async () => {
     if (!user) return;
     try {
+      // 尝试通过后端 API 获取（旧方法）
       const response = await fetch(`${API_BASE}/api/storage/stats?userId=${user.id}`);
       if (response.ok) {
         const data = await response.json();
         setStorageStats(data);
+        return;
       }
     } catch (e) {
-      console.error('Failed to fetch storage stats:', e);
+      console.warn('Failed to fetch storage stats via API, trying direct Supabase access:', e);
+    }
+    
+    // 备用方案：前端直接从 Supabase Storage 获取文件列表
+    try {
+      const simpleUserId = user.id.replace(/-/g, '').slice(0, 8);
+      console.log(`[Storage Stats] 尝试直接从 Supabase 获取，用户ID: ${simpleUserId}`);
+      
+      const { data: files, error } = await supabaseClient
+        .storage
+        .from('audio-files')
+        .list('');
+      
+      if (error) {
+        console.error('Supabase Storage list error:', error);
+        return;
+      }
+      
+      let totalSize = 0;
+      const fileList: any[] = [];
+      
+      if (files && files.length > 0) {
+        for (const file of files) {
+          if (file.name && file.name.includes('.') && !file.name.startsWith('_')) {
+            // 检查是否属于当前用户（文件名以用户ID开头）
+            if (file.name.startsWith(simpleUserId)) {
+              const size = file.metadata?.size || file.size || 0;
+              totalSize += size;
+              fileList.push({
+                name: file.name,
+                size: size,
+                createdAt: file.created_at || file.metadata?.created_at,
+                path: file.name
+              });
+            }
+          }
+        }
+      }
+      
+      setStorageStats({
+        success: true,
+        totalSize: totalSize,
+        totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
+        fileCount: fileList.length,
+        files: fileList
+      });
+      
+      console.log(`[Storage Stats] 直接获取成功: ${fileList.length} 个文件, ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
+      
+    } catch (e) {
+      console.error('Failed to fetch storage stats directly:', e);
     }
   };
 
@@ -516,9 +568,11 @@ export default function App() {
       // 清理文件名中的特殊字符
       baseName = baseName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5-]/g, '_');
       
-      // 生成友好的文件名：材料名_时间戳.扩展名
-      const fileName = `${baseName}_${Date.now()}.${ext}`;
-      const safeFileName = `${user.id}/${materialId}/${fileName}`;
+      // 生成友好的文件名：用户ID_材料ID_时间戳_原名.扩展名
+      const simpleUserId = user.id.replace(/-/g, '').slice(0, 8);
+      const simpleMaterialId = materialId.replace(/-/g, '').slice(0, 8);
+      const fileName = `${simpleUserId}_${simpleMaterialId}_${Date.now()}_${baseName}.${ext}`;
+      const safeFileName = fileName;
       
       console.log(`[Upload] 开始上传: ${file.name}, 大小: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
       console.log(`[Upload] 存储路径: ${safeFileName}`);

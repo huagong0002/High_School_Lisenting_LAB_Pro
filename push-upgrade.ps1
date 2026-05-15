@@ -1,65 +1,86 @@
-@echo off
-chcp 65001 >nul
+# 音频云存储升级推送脚本
+# 执行 git add, commit, push 命令
 
-echo ==========================================
-echo    音频云存储升级 - 推送脚本
-echo ==========================================
-echo.
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "   音频云存储升级 - 推送脚本" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
 
-cd /d "C:\Users\Jerry\Downloads\High_School_Lisenting_LAB_Pro"
-if %errorlevel% neq 0 (
-    echo ❌ 无法进入项目目录
-    pause
-    exit /b 1
-)
+# 设置项目路径
+$projectPath = "C:\Users\Jerry\Downloads\High_School_Lisenting_LAB_Pro"
 
-echo ✅ 已进入项目目录
-echo.
+# 切换到项目目录
+try {
+    Set-Location $projectPath -ErrorAction Stop
+    Write-Host "✅ 已进入项目目录: $projectPath" -ForegroundColor Green
+} catch {
+    Write-Host "❌ 无法进入项目目录: $_" -ForegroundColor Red
+    exit 1
+}
 
-echo 📋 检查 Git 状态...
-git status
-if %errorlevel% neq 0 (
-    echo ❌ Git 命令执行失败
-    pause
-    exit /b 1
-)
-echo.
+# 检查Git状态
+try {
+    Write-Host "`n📋 检查 Git 状态..." -ForegroundColor Yellow
+    git status
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Git 命令执行失败" -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "❌ 检查状态时出错: $_" -ForegroundColor Red
+    exit 1
+}
 
-echo 📥 执行 git add .
-git add .
-if %errorlevel% equ 0 (
-    echo ✅ 文件已添加到暂存区
-) else (
-    echo ❌ git add 失败
-    pause
-    exit /b 1
-)
-echo.
+# 执行 git add .
+try {
+    Write-Host "`n📥 执行 git add ." -ForegroundColor Yellow
+    git add .
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ 文件已添加到暂存区" -ForegroundColor Green
+    } else {
+        Write-Host "❌ git add 失败" -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "❌ 添加文件时出错: $_" -ForegroundColor Red
+    exit 1
+}
 
-echo 📝 执行 git commit...
-git commit -m "feat: 音频云存储升级 - 支持跨设备同步"
-if %errorlevel% equ 0 (
-    echo ✅ 提交成功
-) else (
-    echo ⚠️ git commit 失败（可能没有新更改）
-)
-echo.
+# 执行 git commit
+try {
+    Write-Host "`n📝 执行 git commit..." -ForegroundColor Yellow
+    git commit -m "feat: 音频云存储升级 - 支持跨设备同步"
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ 提交成功" -ForegroundColor Green
+    } else {
+        Write-Host "❌ git commit 失败（可能没有新更改）" -ForegroundColor Yellow
+        # 如果没有新更改，仍然尝试推送
+    }
+} catch {
+    Write-Host "❌ 提交时出错: $_" -ForegroundColor Red
+    exit 1
+}
 
-echo 🚀 执行 git push origin master...
-git push origin master
-if %errorlevel% equ 0 (
-    echo.
-    echo 🎉 推送成功！
-    echo ==========================================
-    echo    Vercel 将自动部署新版本
-    echo ==========================================
-) else (
-    echo ❌ git push 失败
-    echo 💡 可能需要先执行: git pull origin master
-    pause
-    exit /b 1
-)
+# 执行 git push
+try {
+    Write-Host "`n🚀 执行 git push origin master..." -ForegroundColor Yellow
+    git push origin master
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "`n🎉 推送成功！" -ForegroundColor Green
+        Write-Host "==========================================" -ForegroundColor Cyan
+        Write-Host "   Vercel 将自动部署新版本" -ForegroundColor Cyan
+        Write-Host "==========================================" -ForegroundColor Cyan
+    } else {
+        Write-Host "❌ git push 失败" -ForegroundColor Red
+        Write-Host "💡 可能需要先执行: git pull origin master" -ForegroundColor Yellow
+        exit 1
+    }
+} catch {
+    Write-Host "❌ 推送时出错: $_" -ForegroundColor Red
+    exit 1
+}
 
-echo.
-echo ✅ 所有操作完成！
-pause
+Write-Host "`n✅ 所有操作完成！" -ForegroundColor Green

@@ -16,6 +16,13 @@ const getApiBase = () => {
 const API_BASE = getApiBase();
 // 调试日志，帮助确定当前请求目标
 console.log(`[API Config] Target Base: "${API_BASE || 'Relative'}"`);
+
+// Supabase 前端客户端配置（用于直接上传文件，绕过 Vercel 限制）
+import { createClient } from '@supabase/supabase-js';
+const SUPABASE_URL = 'https://erskfzsqaqlrwvmtwzds.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVyc2tmenNxYXFscnd2bXR3emRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4MDYwNzksImV4cCI6MjA5MzM4MjA3OX0.zeI1tFI2nMZi7Dud1qHMl-H2PE27uD1ZMttZS-rbduQ';
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Play, 
@@ -486,101 +493,59 @@ export default function App() {
   };
 
   // File Upload Handlers
-  // 上传音频到云端（增强版）- 支持文件大小限制和错误提示
+  // 上传音频到云端（直接上传到 Supabase Storage，无文件大小限制）
   const uploadAudioToCloud = async (file: File, materialId: string): Promise<string | null> => {
     if (!user) return null;
     
     const uploadKey = materialId;
-    
-    // 检查文件大小（限制 3MB，因为 base64 会增加 33%）
-    const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
-    if (file.size > MAX_FILE_SIZE) {
-      alert(`文件过大！当前文件 ${(file.size / 1024 / 1024).toFixed(2)}MB，最大支持 3MB。\n\n建议：\n1. 使用 MP3 格式压缩音频\n2. 降低音频比特率\n3. 剪辑音频长度`);
-      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
-      return null;
-    }
-    
-    setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 10, status: 'uploading' } }));
+    setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'uploading' } }));
     
     try {
-      // 转换为 base64（适用于 Vercel Serverless 环境）
-      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 30, status: 'uploading' } }));
+      // 生成唯一存储路径
+      const safeFileName = `${user.id}/${materialId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
       
-      const audioData = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          const base64 = result.split(',')[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 50, status: 'uploading' } }));
-
-      // 上传到云端，支持3次重试
-      let lastError = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const response = await fetch(`${API_BASE}/api/upload-audio`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              audioData,
-              fileName: file.name,
-              contentType: file.type,
-              userId: user.id,
-              materialId
-            }),
-            mode: 'cors',
-            credentials: API_BASE ? 'include' : 'same-origin'
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'success' } }));
-            
-            // 刷新存储统计
-            setTimeout(fetchStorageStats, 1000);
-            
-            return data.url;
-          } else {
-            const err = await response.json();
-            lastError = err;
-            console.error(`Upload attempt ${attempt} failed:`, err);
-            
-            // 如果是文件过大错误，直接提示用户
-            if (response.status === 413) {
-              alert(err.message || '文件过大，请压缩后重试');
-              setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
-              return null;
-            }
-            
-            if (attempt < 3) {
-              setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 50 + attempt * 10, status: 'uploading' } }));
-              await new Promise(resolve => setTimeout(resolve, 2000));
-            }
+      console.log(`[Upload] 开始上传: ${file.name}, 大小: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+      
+      // 直接上传到 Supabase Storage（绕过 Vercel 限制）
+      const { data, error } = await supabaseClient
+        .storage
+        .from('audio-files')
+        .upload(safeFileName, file, {
+          contentType: file.type,
+          upsert: true,
+          // 上传进度回调
+          onUploadProgress: (progress) => {
+            const percentage = Math.round((progress.loaded / progress.total) * 100);
+            setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } }));
+            console.log(`[Upload] 进度: ${percentage}%`);
           }
-        } catch (e) {
-          lastError = e;
-          console.error(`Upload attempt ${attempt} failed:`, e);
-          if (attempt < 3) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        }
+        });
+      
+      if (error) {
+        console.error('Upload Error:', error);
+        setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
+        alert(`上传失败: ${error.message || '请检查网络连接'}`);
+        return null;
       }
-
-      // 所有尝试都失败
-      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
-      alert('上传失败，请检查网络连接或稍后重试');
-      console.error('All upload attempts failed:', lastError);
-      return null;
       
-    } catch (e) {
+      // 获取公共访问 URL
+      const { data: { publicUrl } } = supabaseClient
+        .storage
+        .from('audio-files')
+        .getPublicUrl(safeFileName);
+      
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'success' } }));
+      console.log(`[Upload] 上传成功: ${publicUrl}`);
+      
+      // 刷新存储统计
+      setTimeout(fetchStorageStats, 1000);
+      
+      return publicUrl;
+      
+    } catch (e: any) {
       console.error('Upload error:', e);
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
-      alert('上传失败，请检查文件格式');
+      alert(`上传失败: ${e.message || '请检查文件格式'}`);
       return null;
     }
   };

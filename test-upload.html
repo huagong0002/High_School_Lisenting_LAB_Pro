@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文件上传测试 - 3MB 限制验证</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 24px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    }
+    h1 {
+      text-align: center;
+      color: #1f2937;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #6b7280;
+      margin-bottom: 32px;
+      font-size: 14px;
+    }
+    .upload-area {
+      border: 3px dashed #d1d5db;
+      border-radius: 16px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+      background: #f9fafb;
+    }
+    .upload-area:hover {
+      border-color: #667eea;
+      background: #f0f4ff;
+    }
+    .upload-area.dragover {
+      border-color: #667eea;
+      background: #f0f4ff;
+      transform: scale(1.02);
+    }
+    .upload-icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 16px;
+      fill: #9ca3af;
+    }
+    .upload-area:hover .upload-icon,
+    .upload-area.dragover .upload-icon {
+      fill: #667eea;
+    }
+    .upload-text {
+      font-size: 16px;
+      color: #374151;
+      font-weight: 500;
+    }
+    .upload-hint {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 8px;
+    }
+    #fileInput {
+      display: none;
+    }
+    .result {
+      margin-top: 24px;
+      padding: 16px;
+      border-radius: 12px;
+      display: none;
+    }
+    .result.success {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .result.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .result.warning {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .result.show {
+      display: block;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .file-info {
+      margin-top: 20px;
+      padding: 16px;
+      background: #f3f4f6;
+      border-radius: 12px;
+      display: none;
+    }
+    .file-info.show {
+      display: block;
+    }
+    .file-info h3 {
+      font-size: 14px;
+      color: #374151;
+      margin-bottom: 8px;
+    }
+    .file-info p {
+      font-size: 13px;
+      color: #6b7280;
+      margin: 4px 0;
+    }
+    .size-bar {
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    .size-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+    .size-fill.safe {
+      background: #22c55e;
+    }
+    .size-fill.warning {
+      background: #f59e0b;
+    }
+    .size-fill.danger {
+      background: #ef4444;
+    }
+    .test-section {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .test-section h3 {
+      font-size: 16px;
+      color: #374151;
+      margin-bottom: 16px;
+    }
+    .test-btn {
+      display: block;
+      width: 100%;
+      padding: 14px 20px;
+      margin-bottom: 12px;
+      border: none;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .test-btn.small {
+      background: #e0e7ff;
+      color: #4338ca;
+    }
+    .test-btn.small:hover {
+      background: #c7d2fe;
+    }
+    .test-btn.medium {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .test-btn.medium:hover {
+      background: #fde68a;
+    }
+    .test-btn.large {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .test-btn.large:hover {
+      background: #fecaca;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 32px;
+      color: #9ca3af;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📦 文件上传测试</h1>
+    <p class="subtitle">验证 3MB 文件大小限制和错误提示功能</p>
+    
+    <!-- 上传区域 -->
+    <div class="upload-area" id="uploadArea">
+      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="17 8 12 3 7 8"></polyline>
+        <line x1="12" y1="3" x2="12" y2="15"></line>
+      </svg>
+      <div class="upload-text">点击或拖拽文件到此处</div>
+      <div class="upload-hint">支持 MP3、WAV、OGG 格式，最大 3MB</div>
+      <input type="file" id="fileInput" accept="audio/*">
+    </div>
+    
+    <!-- 文件信息 -->
+    <div class="file-info" id="fileInfo">
+      <h3>📋 文件信息</h3>
+      <p><strong>文件名:</strong> <span id="fileName">-</span></p>
+      <p><strong>文件类型:</strong> <span id="fileType">-</span></p>
+      <p><strong>文件大小:</strong> <span id="fileSize">-</span></p>
+      <p><strong>状态:</strong> <span id="fileStatus">-</span></p>
+      <div class="size-bar">
+        <div class="size-fill" id="sizeFill"></div>
+      </div>
+    </div>
+    
+    <!-- 结果提示 -->
+    <div class="result" id="result"></div>
+    
+    <!-- 模拟测试按钮 -->
+    <div class="test-section">
+      <h3>🔧 模拟测试</h3>
+      <button class="test-btn small" onclick="testFileSize(1)">📥 测试小文件 (1MB)</button>
+      <button class="test-btn medium" onclick="testFileSize(2.5)">📥 测试中等文件 (2.5MB)</button>
+      <button class="test-btn large" onclick="testFileSize(4)">📥 测试大文件 (4MB) - 预期触发限制</button>
+    </div>
+    
+    <div class="footer">
+      EchoMaster Pro 文件上传测试工具
+    </div>
+  </div>
+
+  <script>
+    const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
+    
+    // 上传区域交互
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const fileInfo = document.getElementById('fileInfo');
+    const result = document.getElementById('result');
+    
+    uploadArea.addEventListener('click', () => fileInput.click());
+    
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragover');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        handleFile(files[0]);
+      }
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+      }
+    });
+    
+    // 处理文件
+    function handleFile(file) {
+      // 显示文件信息
+      document.getElementById('fileName').textContent = file.name;
+      document.getElementById('fileType').textContent = file.type || '未知';
+      document.getElementById('fileSize').textContent = formatSize(file.size);
+      fileInfo.classList.add('show');
+      
+      // 更新进度条
+      updateSizeBar(file.size);
+      
+      // 验证文件大小
+      validateFileSize(file);
+    }
+    
+    // 验证文件大小
+    function validateFileSize(file) {
+      const sizeMB = file.size / (1024 * 1024);
+      
+      if (file.size <= MAX_FILE_SIZE) {
+        // 文件大小符合要求
+        showResult('success', `✅ 文件大小 ${sizeMB.toFixed(2)}MB 在允许范围内 (最大 3MB)`);
+        document.getElementById('fileStatus').textContent = '✅ 符合要求';
+      } else {
+        // 文件过大
+        showResult('error', `❌ 文件过大！\n\n当前文件: ${sizeMB.toFixed(2)}MB\n最大允许: 3MB\n\n建议：\n1. 使用 MP3 格式压缩音频\n2. 降低音频比特率\n3. 剪辑音频长度`);
+        document.getElementById('fileStatus').textContent = '❌ 超过限制';
+      }
+    }
+    
+    // 模拟文件大小测试
+    function testFileSize(sizeMB) {
+      // 创建模拟文件对象
+      const mockFile = {
+        name: `test-audio-${sizeMB}mb.mp3`,
+        type: 'audio/mpeg',
+        size: sizeMB * 1024 * 1024
+      };
+      
+      // 显示模拟文件信息
+      document.getElementById('fileName').textContent = mockFile.name;
+      document.getElementById('fileType').textContent = mockFile.type;
+      document.getElementById('fileSize').textContent = formatSize(mockFile.size);
+      fileInfo.classList.add('show');
+      
+      // 更新进度条
+      updateSizeBar(mockFile.size);
+      
+      // 验证文件大小
+      validateFileSize(mockFile);
+    }
+    
+    // 更新大小进度条
+    function updateSizeBar(size) {
+      const percentage = Math.min((size / MAX_FILE_SIZE) * 100, 100);
+      const sizeFill = document.getElementById('sizeFill');
+      sizeFill.style.width = `${percentage}%`;
+      
+      // 设置颜色
+      if (percentage <= 70) {
+        sizeFill.className = 'size-fill safe';
+      } else if (percentage <= 90) {
+        sizeFill.className = 'size-fill warning';
+      } else {
+        sizeFill.className = 'size-fill danger';
+      }
+    }
+    
+    // 显示结果
+    function showResult(type, message) {
+      result.className = `result ${type} show`;
+      result.innerHTML = message.replace(/\n/g, '<br>');
+      
+      // 3秒后自动隐藏错误提示
+      if (type === 'error') {
+        setTimeout(() => {
+          result.classList.remove('show');
+        }, 8000);
+      }
+    }
+    
+    // 格式化文件大小
+    function formatSize(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+  </script>
+</body>
+</html>

@@ -503,6 +503,10 @@ export default function App() {
     const uploadKey = materialId;
     setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'uploading' } }));
     
+    // 设置定时器，确保进度至少更新一次
+    let progressInterval: ReturnType<typeof setInterval>;
+    let lastProgress = 0;
+    
     try {
       // 获取文件扩展名
       const ext = file.name.split('.').pop() || 'mp3';
@@ -520,6 +524,19 @@ export default function App() {
       console.log(`[Upload] 存储路径: ${safeFileName}`);
       console.log(`[Upload] 显示名称: ${fileName}`);
       
+      // 启动进度轮询（防止onUploadProgress不触发）
+      progressInterval = setInterval(() => {
+        if (lastProgress < 99) {
+          setUploadProgress(prev => {
+            const current = prev[uploadKey];
+            if (current && current.progress < 99) {
+              return { ...prev, [uploadKey]: { ...current, progress: Math.min(current.progress + 1, 99) } };
+            }
+            return prev;
+          });
+        }
+      }, 2000);
+      
       // 直接上传到 Supabase Storage（绕过 Vercel 限制）
       const { data, error } = await supabaseClient
         .storage
@@ -530,10 +547,13 @@ export default function App() {
           // 上传进度回调
           onUploadProgress: (progress) => {
             const percentage = Math.round((progress.loaded / progress.total) * 100);
+            lastProgress = percentage;
             setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } }));
             console.log(`[Upload] 进度: ${percentage}% (${progress.loaded}/${progress.total})`);
           }
         });
+      
+      clearInterval(progressInterval);
       
       if (error) {
         console.error('[Upload] 上传错误:', error);
@@ -573,12 +593,16 @@ export default function App() {
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'success' } }));
       console.log(`[Upload] 上传成功: ${publicUrl}`);
       
+      // 显示上传成功提示
+      alert('音频文件上传成功！');
+      
       // 刷新存储统计
       setTimeout(fetchStorageStats, 1000);
       
       return publicUrl;
       
     } catch (e: any) {
+      clearInterval(progressInterval);
       console.error('[Upload] 异常错误:', e);
       console.error('[Upload] 异常详情:', e.stack);
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
@@ -590,6 +614,13 @@ export default function App() {
   const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !material) return;
+    
+    // 检查是否正在上传，防止重复上传
+    const currentProgress = uploadProgress[material.id];
+    if (currentProgress && currentProgress.status === 'uploading') {
+      console.warn('[Upload] 正在上传中，跳过重复请求');
+      return;
+    }
 
     // 1. 先显示本地预览（提升用户体验）
     const localUrl = URL.createObjectURL(file);

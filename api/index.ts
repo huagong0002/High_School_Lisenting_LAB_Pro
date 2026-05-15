@@ -337,43 +337,53 @@ async function handleStorageStats(query: any) {
   try {
     console.log(`[Storage Stats] Fetching files for userId: ${userId}`);
     
-    const { data: folders, error: foldersError } = await supabase
-      .storage
-      .from('audio-files')
-      .list(String(userId));
-
-    if (foldersError) {
-      console.error('Storage Stats Error (list folders):', foldersError);
-      return { error: '获取文件列表失败', message: foldersError.message };
-    }
-
-    console.log(`[Storage Stats] Found ${folders?.length || 0} folders`);
-    
     let totalSize = 0;
     const fileList: any[] = [];
+    const possibleUserIds = [String(userId)];
+    
+    // 如果用户ID是长UUID格式，尝试用简化的ID
+    if (userId.length > 10) {
+      possibleUserIds.push('1', userId.slice(-5));
+    }
 
-    if (folders && folders.length > 0) {
-      for (const folder of folders) {
-        if (folder.name && !folder.name.includes('.')) {
-          const { data: files, error: filesError } = await supabase
-            .storage
-            .from('audio-files')
-            .list(`${userId}/${folder.name}`);
+    for (const uid of possibleUserIds) {
+      console.log(`[Storage Stats] 尝试用户ID: ${uid}`);
+      
+      const { data: folders, error: foldersError } = await supabase
+        .storage
+        .from('audio-files')
+        .list(uid);
 
-          if (filesError) {
-            console.warn('Storage Stats Warning (list files in folder):', filesError);
-            continue;
-          }
+      if (foldersError) {
+        console.warn('Storage Stats Warning (list folders):', foldersError.message);
+        continue;
+      }
 
-          for (const file of files || []) {
-            const size = file.metadata?.size || file.size || 0;
-            totalSize += size;
-            fileList.push({
-              name: file.name,
-              size: size,
-              createdAt: file.created_at || file.metadata?.created_at,
-              path: `${userId}/${folder.name}/${file.name}`
-            });
+      console.log(`[Storage Stats] 用户 ${uid} 找到 ${folders?.length || 0} 个文件夹`);
+      
+      if (folders && folders.length > 0) {
+        for (const folder of folders) {
+          if (folder.name && !folder.name.includes('.')) {
+            const { data: files, error: filesError } = await supabase
+              .storage
+              .from('audio-files')
+              .list(`${uid}/${folder.name}`);
+
+            if (filesError) {
+              console.warn('Storage Stats Warning (list files in folder):', filesError.message);
+              continue;
+            }
+
+            for (const file of files || []) {
+              const size = file.metadata?.size || file.size || 0;
+              totalSize += size;
+              fileList.push({
+                name: file.name,
+                size: size,
+                createdAt: file.created_at || file.metadata?.created_at,
+                path: `${uid}/${folder.name}/${file.name}`
+              });
+            }
           }
         }
       }

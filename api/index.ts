@@ -229,23 +229,30 @@ app.post('/api/materials/sync', async (req: Request, res: Response) => {
     return res.status(400).json({ error: '数据格式不正确或缺少用户ID' });
   }
 
+  // --- 备用逻辑：如果数据库未连接，使用内存存储 ---
   if (!supabase) {
-    return res.status(500).json({ error: '数据库未连接' });
+    console.warn('⚠️ Database not connected, using memory fallback');
+    try {
+      // 保存到内存存储
+      LOCAL_STORE[userId] = materials;
+      return res.json({ success: true, count: materials.length, storedIn: 'memory' });
+    } catch (err) {
+      console.error('Memory Storage Error:', err);
+      return res.status(500).json({ error: '内存存储失败' });
+    }
   }
 
   try {
     // --- 精准映射：前端对象 -> 数据库列名 ---
-// api/index.ts 同步接口部分的加固修改
-  const records = materials.map((m: any) => ({
-    id: m.id,
-    user_id: userId,
-    title: m.title || 'Untitled',
-    audio_url: m.audioUrl || '',
-    script: m.script || '',
-    segments: Array.isArray(m.segments) ? m.segments : [],
-  // 关键：强制转换为字符串，以匹配你修改后的数据库 text 类型
-    last_modified: String(m.lastModified || Date.now()) 
-  }));
+    const records = materials.map((m: any) => ({
+      id: m.id,
+      user_id: userId,
+      title: m.title || 'Untitled',
+      audio_url: m.audioUrl || '',
+      script: m.script || '',
+      segments: Array.isArray(m.segments) ? m.segments : [],
+      last_modified: String(m.lastModified || Date.now()) 
+    }));
 
     console.log(`准备同步 ${records.length} 条数据到 Supabase...`);
 

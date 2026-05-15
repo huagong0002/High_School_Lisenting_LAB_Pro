@@ -486,11 +486,20 @@ export default function App() {
   };
 
   // File Upload Handlers
-  // 上传音频到云端（增强版）
+  // 上传音频到云端（增强版）- 支持文件大小限制和错误提示
   const uploadAudioToCloud = async (file: File, materialId: string): Promise<string | null> => {
     if (!user) return null;
     
     const uploadKey = materialId;
+    
+    // 检查文件大小（限制 3MB，因为 base64 会增加 33%）
+    const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`文件过大！当前文件 ${(file.size / 1024 / 1024).toFixed(2)}MB，最大支持 3MB。\n\n建议：\n1. 使用 MP3 格式压缩音频\n2. 降低音频比特率\n3. 剪辑音频长度`);
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
+      return null;
+    }
+    
     setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 10, status: 'uploading' } }));
     
     try {
@@ -541,6 +550,13 @@ export default function App() {
             lastError = err;
             console.error(`Upload attempt ${attempt} failed:`, err);
             
+            // 如果是文件过大错误，直接提示用户
+            if (response.status === 413) {
+              alert(err.message || '文件过大，请压缩后重试');
+              setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
+              return null;
+            }
+            
             if (attempt < 3) {
               setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 50 + attempt * 10, status: 'uploading' } }));
               await new Promise(resolve => setTimeout(resolve, 2000));
@@ -557,12 +573,14 @@ export default function App() {
 
       // 所有尝试都失败
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
+      alert('上传失败，请检查网络连接或稍后重试');
       console.error('All upload attempts failed:', lastError);
       return null;
       
     } catch (e) {
       console.error('Upload error:', e);
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
+      alert('上传失败，请检查文件格式');
       return null;
     }
   };

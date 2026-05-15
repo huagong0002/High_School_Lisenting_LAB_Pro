@@ -297,6 +297,7 @@ app.delete('/api/materials/:id', async (req: Request, res: Response) => {
 /**
  * [POST] 上传音频文件到 Supabase Storage (增强版)
  * 支持进度、压缩、错误重试
+ * 限制：Vercel Serverless 函数最大支持约 4.5MB 请求体
  */
 app.post('/api/upload-audio', async (req: Request, res: Response) => {
   if (!supabase) {
@@ -310,12 +311,31 @@ app.post('/api/upload-audio', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '缺少音频数据或文件信息' });
     }
     
+    // 检查 base64 数据大小（Vercel 限制约 4.5MB）
+    const MAX_BASE64_SIZE = 4 * 1024 * 1024; // 4MB 限制（base64 会增加 33%）
+    if (audioData.length > MAX_BASE64_SIZE) {
+      return res.status(413).json({ 
+        error: '文件过大', 
+        message: '音频文件超过 3MB 限制，请压缩后重试',
+        maxSize: '3MB'
+      });
+    }
+    
     // 生成唯一存储路径
-    const safeFileName = `${userId}/${materialId}/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const safeFileName = `${userId}/${materialId}/${Date.now()-${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     
     // 将 base64 转换为 buffer
     let buffer = Buffer.from(audioData, 'base64');
     const originalSize = buffer.length;
+    
+    // 再次检查转换后的实际大小
+    if (originalSize > 3 * 1024 * 1024) {
+      return res.status(413).json({ 
+        error: '文件过大', 
+        message: '音频文件超过 3MB 限制，请压缩后重试',
+        actualSize: `${(originalSize / 1024 / 1024).toFixed(2)}MB`
+      });
+    }
     
     console.log(`[Upload] 开始上传: ${fileName}, 原始大小: ${(originalSize / 1024 / 1024).toFixed(2)}MB`);
     

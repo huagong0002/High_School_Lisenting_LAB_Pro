@@ -3,11 +3,23 @@ import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import http from 'http';
 
 // 加载环境变量
 dotenv.config();
 
 const app = express();
+
+// Vercel Serverless Function 处理程序
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // 将 Vercel 请求/响应适配到 Express
+  return new Promise<void>((resolve) => {
+    const server = http.createServer(app);
+    server.emit('request', req, res);
+    res.on('finish', resolve);
+  });
+}
 
 // --- 1. Supabase 核心初始化 ---
 const supabaseUrl: string = process.env.SUPABASE_URL || '';
@@ -563,6 +575,4 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-// Vercel Serverless Function 导出
-const handler = app;
-export default handler;
+// Express 应用已在文件开头作为 Vercel 处理程序导出

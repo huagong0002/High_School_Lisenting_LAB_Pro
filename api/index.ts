@@ -208,31 +208,62 @@ async function handleDeleteMaterial(params: any) {
 
 async function handleStorageStats(query: any) {
   if (!supabase) {
+    console.error('Storage Stats Error: Supabase not connected');
     return { error: '数据库未连接' };
   }
   
   const { userId } = query;
   if (!userId) {
+    console.error('Storage Stats Error: Missing userId');
     return { error: '缺少用户ID' };
   }
   
   try {
-    const { data: files, error } = await supabase
+    console.log(`[Storage Stats] Fetching files for userId: ${userId}`);
+    
+    const { data: folders, error: foldersError } = await supabase
       .storage
       .from('audio-files')
       .list(String(userId));
 
+    if (foldersError) {
+      console.error('Storage Stats Error (list folders):', foldersError);
+      return { error: '获取文件列表失败', message: foldersError.message };
+    }
+
+    console.log(`[Storage Stats] Found ${folders?.length || 0} folders`);
+    
     let totalSize = 0;
-    const fileList = files?.map((file: any) => {
-      const size = file.metadata?.size || 0;
-      totalSize += size;
-      return {
-        name: file.name,
-        size: size,
-        createdAt: file.created_at,
-        path: `${userId}/${file.name}`
-      };
-    }) || [];
+    const fileList: any[] = [];
+
+    if (folders && folders.length > 0) {
+      for (const folder of folders) {
+        if (folder.name && !folder.name.includes('.')) {
+          const { data: files, error: filesError } = await supabase
+            .storage
+            .from('audio-files')
+            .list(`${userId}/${folder.name}`);
+
+          if (filesError) {
+            console.warn('Storage Stats Warning (list files in folder):', filesError);
+            continue;
+          }
+
+          for (const file of files || []) {
+            const size = file.metadata?.size || file.size || 0;
+            totalSize += size;
+            fileList.push({
+              name: file.name,
+              size: size,
+              createdAt: file.created_at || file.metadata?.created_at,
+              path: `${userId}/${folder.name}/${file.name}`
+            });
+          }
+        }
+      }
+    }
+
+    console.log(`[Storage Stats] Total files: ${fileList.length}, Total size: ${totalSize} bytes`);
 
     return {
       success: true,

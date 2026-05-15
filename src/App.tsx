@@ -495,7 +495,10 @@ export default function App() {
   // File Upload Handlers
   // 上传音频到云端（直接上传到 Supabase Storage，无文件大小限制）
   const uploadAudioToCloud = async (file: File, materialId: string): Promise<string | null> => {
-    if (!user) return null;
+    if (!user) {
+      console.error('[Upload] 用户未登录');
+      return null;
+    }
     
     const uploadKey = materialId;
     setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'uploading' } }));
@@ -505,6 +508,7 @@ export default function App() {
       const safeFileName = `${user.id}/${materialId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
       
       console.log(`[Upload] 开始上传: ${file.name}, 大小: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+      console.log(`[Upload] 存储路径: ${safeFileName}`);
       
       // 直接上传到 Supabase Storage（绕过 Vercel 限制）
       const { data, error } = await supabaseClient
@@ -517,22 +521,44 @@ export default function App() {
           onUploadProgress: (progress) => {
             const percentage = Math.round((progress.loaded / progress.total) * 100);
             setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } }));
-            console.log(`[Upload] 进度: ${percentage}%`);
+            console.log(`[Upload] 进度: ${percentage}% (${progress.loaded}/${progress.total})`);
           }
         });
       
       if (error) {
-        console.error('Upload Error:', error);
+        console.error('[Upload] 上传错误:', error);
+        console.error('[Upload] 错误详情:', JSON.stringify(error, null, 2));
         setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
-        alert(`上传失败: ${error.message || '请检查网络连接'}`);
+        
+        let errorMsg = '上传失败';
+        if (error.message) {
+          if (error.message.includes('CORS')) {
+            errorMsg = '跨域配置错误，请检查 Supabase CORS 设置';
+          } else if (error.message.includes('permission')) {
+            errorMsg = '权限不足，请检查存储桶权限设置';
+          } else if (error.message.includes('network')) {
+            errorMsg = '网络连接失败，请检查网络';
+          } else {
+            errorMsg = `上传失败: ${error.message}`;
+          }
+        }
+        alert(errorMsg);
         return null;
       }
       
+      console.log('[Upload] 文件上传成功:', data);
+      
       // 获取公共访问 URL
-      const { data: { publicUrl } } = supabaseClient
+      const { data: urlData, error: urlError } = supabaseClient
         .storage
         .from('audio-files')
         .getPublicUrl(safeFileName);
+      
+      if (urlError) {
+        console.error('[Upload] 获取公共URL失败:', urlError);
+      }
+      
+      const publicUrl = urlData?.publicUrl || '';
       
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'success' } }));
       console.log(`[Upload] 上传成功: ${publicUrl}`);
@@ -543,9 +569,10 @@ export default function App() {
       return publicUrl;
       
     } catch (e: any) {
-      console.error('Upload error:', e);
+      console.error('[Upload] 异常错误:', e);
+      console.error('[Upload] 异常详情:', e.stack);
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
-      alert(`上传失败: ${e.message || '请检查文件格式'}`);
+      alert(`上传失败: ${e.message || '未知错误，请检查控制台日志'}`);
       return null;
     }
   };

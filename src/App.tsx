@@ -685,6 +685,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file || !material) return;
     
+    console.log(`[Upload] handleAudioUpload 被调用, material.id: ${material.id}, 当前audioUrl: ${material.audioUrl}`);
+    
     // 检查是否正在上传，防止重复上传
     const currentProgress = uploadProgress[material.id];
     if (currentProgress && currentProgress.status === 'uploading') {
@@ -694,6 +696,7 @@ export default function App() {
 
     // 1. 先显示本地预览（提升用户体验）
     const localUrl = URL.createObjectURL(file);
+    console.log(`[Upload] 设置本地URL: ${localUrl}`);
     setMaterial(prev => ({ ...prev, audioUrl: localUrl }));
 
     // 2. 上传到云端（使用材料标题作为文件名）
@@ -701,10 +704,21 @@ export default function App() {
     
     if (cloudUrl) {
       console.log(`[Upload] 更新audioUrl为云端地址: ${cloudUrl}`);
+      console.log(`[Upload] 更新前material.audioUrl: ${material.audioUrl}`);
+      
       // 3. 更新为云端 URL
-      setMaterial(prev => ({ ...prev, audioUrl: cloudUrl }));
+      setMaterial(prev => {
+        console.log(`[Upload] 旧状态audioUrl: ${prev.audioUrl}`);
+        const newState = { ...prev, audioUrl: cloudUrl };
+        console.log(`[Upload] 新状态audioUrl: ${newState.audioUrl}`);
+        return newState;
+      });
+      
       // 4. 自动保存
-      setTimeout(() => handleImmediateSave(), 500);
+      setTimeout(() => {
+        console.log(`[Upload] 准备保存，当前material.audioUrl: ${material.audioUrl}`);
+        handleImmediateSave();
+      }, 500);
     } else {
       console.warn('[Upload] 上传失败，保持本地预览');
     }

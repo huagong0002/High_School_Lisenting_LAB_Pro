@@ -1892,27 +1892,35 @@ export default function App() {
                                   </div>
                                 </div>
                               </div>
-                              <button 
+                              <button
                                 className="p-2 text-slate-500 hover:text-red-400 transition-all rounded-lg hover:bg-red-500/10"
                                 title="删除文件"
                                 onClick={async () => {
                                   try {
                                     console.log(`[Delete] 尝试删除文件: ${file.path}`);
-                                    
-                                    // 直接使用Supabase删除（绕过可能有问题的后端API）
-                                    const { error } = await supabaseClient
-                                      .storage
-                                      .from('audio-files')
-                                      .remove([file.path]);
-                                    
-                                    if (error) {
-                                      console.error('Supabase delete error:', error);
-                                      console.error('Supabase delete error详情:', JSON.stringify(error, null, 2));
-                                      alert(`删除失败: ${error.message}`);
+
+                                    // 确认删除
+                                    if (!confirm(`确定要删除文件 "${file.name}" 吗？`)) {
                                       return;
                                     }
-                                    
-                                    console.log('[Delete] Supabase删除成功');
+
+                                    // 使用后端API删除（后端有service role key权限）
+                                    const response = await fetch(`${API_BASE}/api/audio`, {
+                                      method: 'DELETE',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ path: file.path })
+                                    });
+
+                                    const result = await response.json();
+                                    console.log(`[Delete] API响应:`, result);
+
+                                    if (!response.ok || result.error) {
+                                      console.error('[Delete] API删除失败:', result);
+                                      alert(`删除失败: ${result.error || result.message || '未知错误'}`);
+                                      return;
+                                    }
+
+                                    console.log('[Delete] 删除成功');
                                     fetchStorageStats();
                                     alert('文件删除成功！');
                                   } catch (e) {

@@ -1898,36 +1898,21 @@ export default function App() {
                                 onClick={async () => {
                                   try {
                                     console.log(`[Delete] 尝试删除文件: ${file.path}`);
-                                    // 首先尝试通过后端API删除
-                                    let deleted = false;
-                                    try {
-                                      const response = await fetch(`${API_BASE}/api/audio`, {
-                                        method: 'DELETE',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ path: file.path })
-                                      });
-                                      deleted = response.ok;
-                                      console.log(`[Delete] API删除结果: ${deleted}`);
-                                    } catch (e) {
-                                      console.warn('Delete via API failed, trying direct Supabase', e);
+                                    
+                                    // 直接使用Supabase删除（绕过可能有问题的后端API）
+                                    const { error } = await supabaseClient
+                                      .storage
+                                      .from('audio-files')
+                                      .remove([file.path]);
+                                    
+                                    if (error) {
+                                      console.error('Supabase delete error:', error);
+                                      console.error('Supabase delete error详情:', JSON.stringify(error, null, 2));
+                                      alert(`删除失败: ${error.message}`);
+                                      return;
                                     }
                                     
-                                    // 如果后端API失败，直接使用Supabase删除
-                                    if (!deleted) {
-                                      console.log(`[Delete] 使用Supabase直接删除: ${file.path}`);
-                                      const { error } = await supabaseClient
-                                        .storage
-                                        .from('audio-files')
-                                        .remove([file.path]);
-                                      
-                                      if (error) {
-                                        console.error('Supabase delete error:', error);
-                                        alert(`删除失败: ${error.message}`);
-                                        return;
-                                      }
-                                      console.log('[Delete] Supabase删除成功');
-                                    }
-                                    
+                                    console.log('[Delete] Supabase删除成功');
                                     fetchStorageStats();
                                     alert('文件删除成功！');
                                   } catch (e) {

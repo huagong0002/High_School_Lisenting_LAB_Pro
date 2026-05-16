@@ -122,7 +122,8 @@ export default function App() {
     if (!user) return;
     try {
       setLastSaved('正在同步...');
-      const response = await fetch(`${API_BASE}/api/materials?userId=${user.id}`, {
+      // 获取所有共享材料（不按用户ID过滤）
+      const response = await fetch(`${API_BASE}/api/materials`, {
         mode: 'cors',
         credentials: API_BASE ? 'include' : 'same-origin'
       });
@@ -973,40 +974,40 @@ export default function App() {
                 <button 
                   onClick={() => setMode('setup')}
                   className={cn(
-                    "px-6 py-3 text-base font-bold transition-all rounded-xl flex items-center gap-2",
-                    mode === 'setup' ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "btn-glass text-slate-300"
+                    "min-w-[80px] px-5 py-3 text-sm font-semibold transition-all duration-300 rounded-xl flex items-center justify-center gap-2",
+                    mode === 'setup' ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30 scale-[1.02]" : "btn-glass text-slate-300 hover:text-white hover:bg-white/5"
                   )}
                 >
-                  <Upload size={20} /> 设置
+                  <Settings2 size={18} /> 设置
                   {!canEdit && material && <Lock size={12} className="text-amber-500" />}
                 </button>
                 <button 
                   onClick={() => setMode('library')}
                   className={cn(
-                    "px-6 py-3 text-base font-bold transition-all rounded-xl flex items-center gap-2",
-                    mode === 'library' ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "btn-glass text-slate-300"
+                    "min-w-[80px] px-5 py-3 text-sm font-semibold transition-all duration-300 rounded-xl flex items-center justify-center gap-2",
+                    mode === 'library' ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30 scale-[1.02]" : "btn-glass text-slate-300 hover:text-white hover:bg-white/5"
                   )}
                 >
-                  <Library size={20} /> 库
+                  <Library size={18} /> 文库
                 </button>
                 <button 
                   onClick={() => setMode('edit')}
                   className={cn(
-                    "px-6 py-3 text-base font-bold transition-all rounded-xl flex items-center gap-2",
-                    mode === 'edit' ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "btn-glass text-slate-300"
+                    "min-w-[80px] px-5 py-3 text-sm font-semibold transition-all duration-300 rounded-xl flex items-center justify-center gap-2",
+                    mode === 'edit' ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/30 scale-[1.02]" : "btn-glass text-slate-300 hover:text-white hover:bg-white/5"
                   )}
                 >
-                  <Settings2 size={20} /> 分段
+                  <Clock size={18} /> 分段
                   {!canEdit && material && <Lock size={12} className="text-amber-500" />}
                 </button>
                 <button 
                   onClick={() => setMode('train')}
                   className={cn(
-                    "px-6 py-3 text-base font-bold transition-all rounded-xl flex items-center gap-2",
-                    mode === 'train' ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "btn-glass text-slate-300"
+                    "min-w-[80px] px-5 py-3 text-sm font-semibold transition-all duration-300 rounded-xl flex items-center justify-center gap-2",
+                    mode === 'train' ? "bg-gradient-to-r from-green-600 to-green-700 text-white shadow-lg shadow-green-600/30 scale-[1.02]" : "btn-glass text-slate-300 hover:text-white hover:bg-white/5"
                   )}
                 >
-                  <BookOpen size={20} /> 训练
+                  <Play size={18} /> 训练
                 </button>
                 <button 
                   onClick={() => {
@@ -1014,11 +1015,11 @@ export default function App() {
                     setMode('storage');
                   }}
                   className={cn(
-                    "px-6 py-3 text-base font-bold transition-all rounded-xl flex items-center gap-2",
-                    mode === 'storage' ? "bg-purple-600 text-white shadow-lg shadow-purple-600/20" : "btn-glass text-slate-300"
+                    "min-w-[80px] px-5 py-3 text-sm font-semibold transition-all duration-300 rounded-xl flex items-center justify-center gap-2",
+                    mode === 'storage' ? "bg-gradient-to-r from-purple-600 to-purple-700 text-white shadow-lg shadow-purple-600/30 scale-[1.02]" : "btn-glass text-slate-300 hover:text-white hover:bg-white/5"
                   )}
                 >
-                  <Folder size={20} /> 存储
+                  <Folder size={18} /> 存储
                 </button>
               </nav>
             )}
@@ -1031,9 +1032,9 @@ export default function App() {
                   <span className="text-xs font-bold text-white tracking-tight">{(user as any).username || (user as any).displayName || user.email || '用户'}</span>
                   <button 
                     onClick={handleLogout}
-                    className="text-xs text-red-500 font-bold uppercase tracking-wider mt-1 hover:underline"
+                    className="text-xs text-red-400 font-semibold uppercase tracking-wider mt-1 hover:text-red-300 hover:underline transition-colors"
                   >
-                    退出登录
+                    登出
                   </button>
                 </div>
                 <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20 overflow-hidden border border-white/10">

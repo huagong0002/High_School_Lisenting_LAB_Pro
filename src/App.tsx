@@ -308,6 +308,14 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  
+  // 监听audioUrl变化，强制重新加载音频
+  useEffect(() => {
+    if (audioRef.current && material.audioUrl) {
+      console.log(`[Audio] 重新加载音频: ${material.audioUrl}`);
+      audioRef.current.load();
+    }
+  }, [material.audioUrl]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -597,23 +605,25 @@ export default function App() {
         }
       }, 2000);
       
-      // 直接上传到 Supabase Storage（绕过 Vercel 限制）
-      const { data, error } = await supabaseClient
-        .storage
-        .from('audio-files')
-        .upload(safeFileName, file, {
-          contentType: file.type,
-          upsert: true,
-          // 上传进度回调
-          onUploadProgress: (progress) => {
-            const percentage = Math.round((progress.loaded / progress.total) * 100);
-            lastProgress = percentage;
-            setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } }));
-            console.log(`[Upload] 进度: ${percentage}% (${progress.loaded}/${progress.total})`);
-          }
-        });
-      
-      clearInterval(progressInterval);
+      // 直接上传到Supabase Storage（绕过Vercel限制）
+            const { data, error } = await supabaseClient
+              .storage
+              .from('audio-files')
+              .upload(safeFileName, file, {
+                contentType: file.type,
+                upsert: true,
+                // 上传进度回调
+                onUploadProgress: (progress) => {
+                  const percentage = Math.round((progress.loaded / progress.total) * 100);
+                  lastProgress = percentage;
+                  setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } }));
+                  console.log(`[Upload] 进度: ${percentage}% (${progress.loaded}/${progress.total})`);
+                }
+              });
+            
+            // 强制更新进度到100%
+            setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'uploading' } }));
+            clearInterval(progressInterval);
       
       if (error) {
         console.error('[Upload] 上传错误:', error);

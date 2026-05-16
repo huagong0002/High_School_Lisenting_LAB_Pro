@@ -565,18 +565,24 @@ export default function App() {
       
       // 使用材料名称或自定义名称作为文件名
       let baseName = customName || material?.title || 'audio';
-      // 清理文件名中的特殊字符
-      baseName = baseName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5-]/g, '_');
+      console.log(`[Upload] 原始文件名: "${baseName}"`);
       
-      // 生成友好的文件名：用户ID_材料ID_时间戳_原名.扩展名
+      // 清理文件名中的特殊字符，只保留 ASCII 字符（防止 Supabase 报错）
+      baseName = baseName
+        .replace(/[^\x00-\x7F]/g, '_')  // 移除所有非ASCII字符（包括中文）
+        .replace(/[^a-zA-Z0-9_-]/g, '_');  // 只保留字母、数字、下划线和连字符
+      console.log(`[Upload] 清理后文件名: "${baseName}"`);
+      
+      // 生成友好的文件名：用户ID_材料ID_时间戳.扩展名
       const simpleUserId = user.id.replace(/-/g, '').slice(0, 8);
       const simpleMaterialId = materialId.replace(/-/g, '').slice(0, 8);
-      const fileName = `${simpleUserId}_${simpleMaterialId}_${Date.now()}_${baseName}.${ext}`;
-      const safeFileName = fileName;
+      const timestamp = Date.now();
+      // 使用纯ASCII字符文件名，避免Supabase Storage报错
+      const safeFileName = `${simpleUserId}_${simpleMaterialId}_${timestamp}.${ext}`;
       
       console.log(`[Upload] 开始上传: ${file.name}, 大小: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
-      console.log(`[Upload] 存储路径: ${safeFileName}`);
-      console.log(`[Upload] 显示名称: ${fileName}`);
+      console.log(`[Upload] 原始材料名: "${baseName}"`);
+      console.log(`[Upload] 存储文件名: ${safeFileName}`);
       
       // 启动进度轮询（防止onUploadProgress不触发）
       progressInterval = setInterval(() => {

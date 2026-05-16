@@ -309,6 +309,13 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   
+  // 使用ref存储最新的audioUrl，解决闭包问题
+  const latestAudioUrlRef = useRef<string | undefined>(material.audioUrl);
+  
+  useEffect(() => {
+    latestAudioUrlRef.current = material.audioUrl;
+  }, [material.audioUrl]);
+  
   // 监听audioUrl变化，强制重新加载音频
   useEffect(() => {
     if (audioRef.current && material.audioUrl) {
@@ -704,19 +711,13 @@ export default function App() {
     
     if (cloudUrl) {
       console.log(`[Upload] 更新audioUrl为云端地址: ${cloudUrl}`);
-      console.log(`[Upload] 更新前material.audioUrl: ${material.audioUrl}`);
       
       // 3. 更新为云端 URL
-      setMaterial(prev => {
-        console.log(`[Upload] 旧状态audioUrl: ${prev.audioUrl}`);
-        const newState = { ...prev, audioUrl: cloudUrl };
-        console.log(`[Upload] 新状态audioUrl: ${newState.audioUrl}`);
-        return newState;
-      });
+      setMaterial(prev => ({ ...prev, audioUrl: cloudUrl }));
       
-      // 4. 自动保存
+      // 4. 自动保存（使用ref获取最新状态，避免闭包问题）
       setTimeout(() => {
-        console.log(`[Upload] 准备保存，当前material.audioUrl: ${material.audioUrl}`);
+        console.log(`[Upload] 准备保存，当前audioUrl(ref): ${latestAudioUrlRef.current}`);
         handleImmediateSave();
       }, 500);
     } else {
@@ -1887,7 +1888,7 @@ export default function App() {
                                 <div>
                                   <div className="font-bold text-white text-sm">{file.name}</div>
                                   <div className="text-xs text-slate-500">
-                                    {(file.size / 1024 / 1024).toFixed(2)} MB · {file.createdAt}
+                                    {(file.size / 1024 / 1024).toFixed(2)} MB · {file.createdAt ? new Date(file.createdAt).toLocaleString('zh-CN') : '未知'}
                                   </div>
                                 </div>
                               </div>

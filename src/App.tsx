@@ -1872,6 +1872,7 @@ export default function App() {
                                 title="删除文件"
                                 onClick={async () => {
                                   try {
+                                    console.log(`[Delete] 尝试删除文件: ${file.path}`);
                                     // 首先尝试通过后端API删除
                                     let deleted = false;
                                     try {
@@ -1881,12 +1882,14 @@ export default function App() {
                                         body: JSON.stringify({ path: file.path })
                                       });
                                       deleted = response.ok;
+                                      console.log(`[Delete] API删除结果: ${deleted}`);
                                     } catch (e) {
                                       console.warn('Delete via API failed, trying direct Supabase', e);
                                     }
                                     
                                     // 如果后端API失败，直接使用Supabase删除
                                     if (!deleted) {
+                                      console.log(`[Delete] 使用Supabase直接删除: ${file.path}`);
                                       const { error } = await supabaseClient
                                         .storage
                                         .from('audio-files')
@@ -1897,6 +1900,7 @@ export default function App() {
                                         alert(`删除失败: ${error.message}`);
                                         return;
                                       }
+                                      console.log('[Delete] Supabase删除成功');
                                     }
                                     
                                     fetchStorageStats();

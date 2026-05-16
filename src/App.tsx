@@ -690,10 +690,13 @@ export default function App() {
     const cloudUrl = await uploadAudioToCloud(file, material.id, material.title);
     
     if (cloudUrl) {
+      console.log(`[Upload] 更新audioUrl为云端地址: ${cloudUrl}`);
       // 3. 更新为云端 URL
       setMaterial(prev => ({ ...prev, audioUrl: cloudUrl }));
       // 4. 自动保存
       setTimeout(() => handleImmediateSave(), 500);
+    } else {
+      console.warn('[Upload] 上传失败，保持本地预览');
     }
 
     if (mode === 'setup') setMode('edit');
@@ -1869,14 +1872,38 @@ export default function App() {
                                 title="删除文件"
                                 onClick={async () => {
                                   try {
-                                    await fetch(`${API_BASE}/api/audio`, {
-                                      method: 'DELETE',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ path: file.path })
-                                    });
+                                    // 首先尝试通过后端API删除
+                                    let deleted = false;
+                                    try {
+                                      const response = await fetch(`${API_BASE}/api/audio`, {
+                                        method: 'DELETE',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ path: file.path })
+                                      });
+                                      deleted = response.ok;
+                                    } catch (e) {
+                                      console.warn('Delete via API failed, trying direct Supabase', e);
+                                    }
+                                    
+                                    // 如果后端API失败，直接使用Supabase删除
+                                    if (!deleted) {
+                                      const { error } = await supabaseClient
+                                        .storage
+                                        .from('audio-files')
+                                        .remove([file.path]);
+                                      
+                                      if (error) {
+                                        console.error('Supabase delete error:', error);
+                                        alert(`删除失败: ${error.message}`);
+                                        return;
+                                      }
+                                    }
+                                    
                                     fetchStorageStats();
+                                    alert('文件删除成功！');
                                   } catch (e) {
                                     console.error('Delete failed', e);
+                                    alert('删除失败，请检查控制台日志');
                                   }
                                 }}
                               >

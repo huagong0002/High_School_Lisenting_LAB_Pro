@@ -641,16 +641,17 @@ export default function App() {
         setUploadProgress(prev => {
           const current = prev[uploadKey];
           if (current && current.status === 'uploading') {
-            // 当进度达到95%以上时，自动增加到100%，改善用户体验
-            if (current.progress >= 95 && current.progress < 100) {
+            // 当进度达到90%以上时，自动增加到100%，改善用户体验
+            if (current.progress >= 90 && current.progress < 100) {
               return { ...prev, [uploadKey]: { ...current, progress: 100 } };
-            } else if (current.progress < 95 && lastProgress < 95) {
-              return { ...prev, [uploadKey]: { ...current, progress: Math.min(current.progress + 1, 94) } };
+            } else if (current.progress < 90) {
+              // 正常进度增加，但不超过89%
+              return { ...prev, [uploadKey]: { ...current, progress: Math.min(current.progress + 2, 89) } };
             }
           }
           return prev;
         });
-      }, 1500);
+      }, 1000);
       
       // 直接上传到Supabase Storage（绕过Vercel限制）
       let uploadResult;

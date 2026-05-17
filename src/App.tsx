@@ -54,6 +54,7 @@ import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { AudioSegment, ListeningMaterial, User as UserType } from './types';
+import { mockMaterials, mockUser } from './mockData';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -122,7 +123,21 @@ export default function App() {
     if (!user) return;
     try {
       setLastSaved('正在同步...');
-      // 获取所有共享材料（不按用户ID过滤）
+      
+      // 本地开发环境使用模拟数据（localhost或AI Studio环境）
+      const isLocal = typeof window !== 'undefined' && 
+        (window.location.hostname.includes('localhost') || 
+         window.location.hostname.includes('127.0.0.1') ||
+         window.location.hostname.includes('.run.app'));
+      
+      if (isLocal) {
+        console.log('[Mock Data] 使用模拟数据');
+        setMaterials(mockMaterials);
+        setLastSaved('本地测试数据');
+        return;
+      }
+      
+      // 生产环境获取真实数据（不按用户ID过滤）
       const response = await fetch(`${API_BASE}/api/materials`, {
         mode: 'cors',
         credentials: API_BASE ? 'include' : 'same-origin'
@@ -183,9 +198,13 @@ export default function App() {
   const handleImmediateSave = async () => {
     if (!material || !user) return;
     
-    // 1. First sync current material to the list
+    // 使用ref获取最新的audioUrl，避免闭包问题导致保存旧的blob URL
+    const currentAudioUrl = latestAudioUrlRef.current || material.audioUrl;
+    
+    // 1. First sync current material to the list with the latest audioUrl
+    const updatedMaterial = { ...material, audioUrl: currentAudioUrl, lastModified: Date.now() };
     const updatedMaterials = materials.map(m => 
-      m.id === material.id ? { ...material, lastModified: Date.now() } : m
+      m.id === material.id ? updatedMaterial : m
     );
     setMaterials(updatedMaterials);
     
@@ -211,17 +230,21 @@ export default function App() {
         const index = prev.findIndex(m => m.id === material.id);
         if (index === -1) return prev;
         
+        // 使用ref获取最新的audioUrl，避免闭包问题
+        const currentAudioUrl = latestAudioUrlRef.current || material.audioUrl;
+        
         // Only update if content actually changed to avoid redundant re-renders
         const existing = prev[index];
+        const materialWithLatestUrl = { ...material, audioUrl: currentAudioUrl };
         const { lastModified: _old, ...restExisting } = existing;
-        const { lastModified: _new, ...restCurrent } = material;
+        const { lastModified: _new, ...restCurrent } = materialWithLatestUrl;
         
         if (JSON.stringify(restExisting) === JSON.stringify(restCurrent)) {
           return prev;
         }
         
         const newList = [...prev];
-        newList[index] = { ...material, lastModified: Date.now() };
+        newList[index] = { ...materialWithLatestUrl, lastModified: Date.now() };
         return newList;
       });
       setLastSaved(new Date().toLocaleTimeString());
@@ -325,9 +348,35 @@ export default function App() {
     }
   }, [material.audioUrl]);
 
+  // 监听currentMaterialId变化，确保音频正确加载
+  useEffect(() => {
+    if (currentMaterialId && audioRef.current && material.audioUrl) {
+      console.log(`[Audio] 材料切换，重新加载音频: ${material.audioUrl}`);
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current.load();
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  }, [currentMaterialId]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    
+    // 本地开发环境使用模拟登录
+    const isLocal = typeof window !== 'undefined' && 
+      (window.location.hostname.includes('localhost') || 
+       window.location.hostname.includes('127.0.0.1') ||
+       window.location.hostname.includes('.run.app'));
+    
+    if (isLocal) {
+      console.log('[Mock Login] 本地开发环境，使用模拟用户登录');
+      setUser(mockUser);
+      localStorage.setItem('echomaster_user', JSON.stringify(mockUser));
+      return;
+    }
+    
     const timestamp = Date.now();
     const apiUrl = `${API_BASE}/api/login?t=${timestamp}`;
     console.log(`--- Attempting Login ---`);

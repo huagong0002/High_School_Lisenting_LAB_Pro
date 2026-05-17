@@ -185,6 +185,36 @@ export default function App() {
     fetchLibrary();
   }, [user]);
 
+  // Auto-save: Save material changes to localStorage and backend
+  useEffect(() => {
+    if (!material || !material.id || !user) return;
+    
+    console.log(`[AutoSave] 材料变化，自动保存中... ID: ${material.id}`);
+    
+    // Save to localStorage immediately
+    setMaterials(prev => {
+      const existingIndex = prev.findIndex(m => m.id === material.id);
+      let updated = prev;
+      if (existingIndex >= 0) {
+        updated = prev.map(m => m.id === material.id ? { ...material, lastModified: Date.now() } : m);
+      } else {
+        updated = [...prev, { ...material, lastModified: Date.now() }];
+      }
+      localStorage.setItem(`echomaster_library_shared`, JSON.stringify(updated));
+      return updated;
+    });
+    
+    // Debounce sync to backend (only sync after 2 seconds of inactivity)
+    const debounceTimer = setTimeout(() => {
+      setMaterials(current => {
+        syncToBackend(current);
+        return current;
+      });
+    }, 2000);
+    
+    return () => clearTimeout(debounceTimer);
+  }, [material, user]);
+
   // Update effect for material selection
   useEffect(() => {
     if (currentMaterialId) {
@@ -566,10 +596,24 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         console.log('[App] 页面隐藏');
+        // 页面隐藏时，保存当前材料到localStorage
+        if (material && material.id) {
+          setMaterials(prev => {
+            const existingIndex = prev.findIndex(m => m.id === material.id);
+            let updated = prev;
+            if (existingIndex >= 0) {
+              updated = prev.map(m => m.id === material.id ? material : m);
+            } else {
+              updated = [...prev, material];
+            }
+            localStorage.setItem(`echomaster_library_shared`, JSON.stringify(updated));
+            return updated;
+          });
+        }
       } else {
         console.log('[App] 页面显示');
-        // 页面重新显示时，强制触发一次重渲染
-        if (user) {
+        // 页面重新显示时，仅在材料列表为空时才刷新
+        if (user && (!materials || materials.length === 0)) {
           fetchLibrary();
         }
       }
@@ -762,8 +806,8 @@ export default function App() {
         }
       }
       
-      // 立即更新进度到100%
-      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'uploading' } }));
+      // 立即更新进度到95%（表示上传完成，正在获取URL）
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 95, status: 'processing' } }));
       clearInterval(progressInterval);
       
       if (uploadError) {
@@ -792,6 +836,7 @@ export default function App() {
       console.log('[Upload] 文件上传成功:', uploadResult.data);
       
       // 获取公共访问 URL
+      console.log('[Upload] 正在获取公共URL...');
       const { data: urlData, error: urlError } = supabaseClient
         .storage
         .from('audio-files')
@@ -802,9 +847,11 @@ export default function App() {
       }
       
       const publicUrl = urlData?.publicUrl || '';
+      console.log(`[Upload] 公共URL获取成功: ${publicUrl}`);
       
+      // 更新进度到100%
       setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'success' } }));
-      console.log(`[Upload] 上传成功: ${publicUrl}`);
+      console.log(`[Upload] 上传完成: ${publicUrl}`);
       
       // 显示上传成功提示
       alert('音频文件上传成功！');
@@ -840,7 +887,13 @@ export default function App() {
     // 1. 先显示本地预览（提升用户体验）
     const localUrl = URL.createObjectURL(file);
     console.log(`[Upload] 设置本地URL: ${localUrl}`);
-    setMaterial(prev => ({ ...prev, audioUrl: localUrl }));
+    
+    // 立即更新材料状态
+    setMaterial(prev => {
+      const updated = { ...prev, audioUrl: localUrl };
+      console.log(`[Upload] 临时设置本地URL: ${updated.audioUrl}`);
+      return updated;
+    });
 
     // 2. 上传到云端（使用材料标题作为文件名）
     const cloudUrl = await uploadAudioToCloud(file, material.id, material.title);
@@ -853,7 +906,7 @@ export default function App() {
       // 3. 更新为云端 URL（使用回调确保状态正确）
       setMaterial(prev => {
         const updated = { ...prev, audioUrl: cloudUrl };
-        console.log(`[Upload] 材料audioUrl已更新: ${updated.audioUrl}`);
+        console.log(`[Upload] 材料audioUrl已更新为云端URL: ${updated.audioUrl}`);
         return updated;
       });
       
@@ -891,6 +944,11 @@ export default function App() {
         
         // 立即同步到后端
         syncToBackend(updated);
+        
+        // 同时更新localStorage，确保刷新页面后数据不丢失
+        localStorage.setItem(`echomaster_library_shared`, JSON.stringify(updated));
+        console.log('[Upload] 材料已保存到localStorage');
+        
         return updated;
       });
     } else {

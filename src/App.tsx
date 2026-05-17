@@ -360,68 +360,6 @@ export default function App() {
   // 音频元数据缓存，只缓存时长信息，避免缓存整个音频元素
   const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean }>>(new Map());
   
-  // 预加载音频的辅助函数
-  const preloadAudio = useCallback((audioUrl: string) => {
-    if (!audioUrl || audioMetadataCache.current.has(audioUrl)) {
-      return; // 已经缓存或URL为空
-    }
-    
-    console.log(`[Audio] 开始预加载音频: ${audioUrl}`);
-    
-    const tempAudio = new Audio(audioUrl);
-    tempAudio.crossOrigin = 'anonymous';
-    tempAudio.preload = 'auto';
-    
-    tempAudio.addEventListener('loadedmetadata', () => {
-      audioMetadataCache.current.set(audioUrl, {
-        duration: tempAudio.duration,
-        ready: true
-      });
-      console.log(`[Audio] 预加载完成，时长: ${tempAudio.duration}s`);
-      tempAudio.src = '';
-    });
-    
-    tempAudio.addEventListener('error', () => {
-      console.warn(`[Audio] 预加载失败: ${audioUrl}`);
-      tempAudio.src = '';
-    });
-    
-    setTimeout(() => {
-      if (!audioMetadataCache.current.get(audioUrl)?.ready) {
-        console.log(`[Audio] 预加载超时: ${audioUrl}`);
-        tempAudio.src = '';
-      }
-    }, 10000);
-    
-    tempAudio.load();
-  }, []);
-  
-  // 预加载材料列表中的音频（在preloadAudio定义之后）
-  useEffect(() => {
-    if (!user || materials.length === 0) return;
-    
-    const materialsWithAudio = materials.filter(m => m.audioUrl);
-    
-    if (materialsWithAudio.length > 0) {
-      console.log(`[Audio] 开始预加载 ${materialsWithAudio.length} 个音频文件`);
-      
-      if (currentMaterialId) {
-        const currentMat = materialsWithAudio.find(m => m.id === currentMaterialId);
-        if (currentMat) {
-          preloadAudio(currentMat.audioUrl!);
-        }
-      }
-      
-      setTimeout(() => {
-        materialsWithAudio.forEach((mat, index) => {
-          if (mat.id !== currentMaterialId) {
-            setTimeout(() => preloadAudio(mat.audioUrl!), index * 500);
-          }
-        });
-      }, 1000);
-    }
-  }, [materials, currentMaterialId, preloadAudio]);
-  
   useEffect(() => {
     latestAudioUrlRef.current = material.audioUrl;
   }, [material.audioUrl]);
@@ -458,26 +396,14 @@ export default function App() {
         setAudioLoading(true);
         setAudioError(null);
         
-        // 检查元数据缓存中是否已有该音频信息
-        const cachedMetadata = audioMetadataCache.current.get(audioUrl);
-        if (cachedMetadata && cachedMetadata.ready && cachedMetadata.duration > 0) {
-          console.log(`[Audio] 使用缓存的音频元数据，时长: ${cachedMetadata.duration}s`);
-          // 直接设置音频src，浏览器会从缓存加载
-          audioRef.current.src = audioUrl;
-          setDuration(cachedMetadata.duration);
-          // 延迟设置加载完成，给浏览器时间准备
-          setTimeout(() => setAudioLoading(false), 100);
-        } else {
-          console.log(`[Audio] 加载新音频`);
-          // 加载新音频
-          audioRef.current.src = audioUrl;
-          requestAnimationFrame(() => {
-            if (audioRef.current) {
-              audioRef.current.currentTime = 0;
-              audioRef.current.load();
-            }
-          });
-        }
+        console.log(`[Audio] 加载音频: ${audioUrl}`);
+        audioRef.current.src = audioUrl;
+        requestAnimationFrame(() => {
+          if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.load();
+          }
+        });
       } else {
         console.warn(`[Audio] 警告: 当前材料没有音频URL，材料ID: ${currentMaterialId}`);
         setAudioError('当前材料没有音频文件');
@@ -969,56 +895,9 @@ export default function App() {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      // 检查缓冲状态，如果缓冲不足则等待
-      const audio = audioRef.current;
-      if (audio.buffered.length > 0 && audio.duration > 0) {
-        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
-        const bufferAhead = bufferedEnd - audio.currentTime;
-        
-        console.log(`[Audio] 准备播放，缓冲超前: ${bufferAhead.toFixed(2)}s`);
-        
-        // 如果缓冲不足2秒，等待更多缓冲
-        if (bufferAhead < 2 && bufferProgress < 100) {
-          console.log(`[Audio] 缓冲不足，等待更多缓冲...`);
-          setAudioLoading(true);
-          
-          // 设置一个合理的超时
-          const maxWaitTime = 5000; // 最多等待5秒
-          const startTime = Date.now();
-          
-          // 等待缓冲足够或超时
-          await new Promise<void>((resolve) => {
-            const checkBuffer = () => {
-              if (Date.now() - startTime >= maxWaitTime) {
-                console.log(`[Audio] 缓冲等待超时，尝试播放`);
-                resolve();
-                return;
-              }
-              
-              if (audio.buffered.length > 0) {
-                const newBufferedEnd = audio.buffered.end(audio.buffered.length - 1);
-                const newBufferAhead = newBufferedEnd - audio.currentTime;
-                
-                if (newBufferAhead >= 2 || bufferProgress >= 100) {
-                  console.log(`[Audio] 缓冲足够，开始播放`);
-                  resolve();
-                  return;
-                }
-              }
-              
-              setTimeout(checkBuffer, 100);
-            };
-            
-            checkBuffer();
-          });
-          
-          setAudioLoading(false);
-        }
-      }
-      
       // 尝试播放，添加错误处理
       try {
-        await audio.play();
+        await audioRef.current.play();
         setIsPlaying(true);
         console.log(`[Audio] 播放成功`);
       } catch (e) {
@@ -1145,7 +1024,8 @@ export default function App() {
 
     const handleWaiting = () => {
       console.log(`[Audio] 等待缓冲...`);
-      setAudioLoading(true);
+      // 播放过程中不显示加载状态，只在初始加载时显示
+      // setAudioLoading(true);
     };
 
     const handleCanPlayThrough = () => {
@@ -1156,7 +1036,8 @@ export default function App() {
 
     const handleStalled = () => {
       console.warn(`[Audio] 音频播放停滞，正在重新缓冲`);
-      setAudioLoading(true);
+      // 播放过程中不显示加载状态，只在初始加载时显示
+      // setAudioLoading(true);
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);

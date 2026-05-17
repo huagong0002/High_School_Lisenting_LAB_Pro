@@ -638,16 +638,19 @@ export default function App() {
       
       // 启动进度轮询（防止onUploadProgress不触发）
       progressInterval = setInterval(() => {
-        if (lastProgress < 99) {
-          setUploadProgress(prev => {
-            const current = prev[uploadKey];
-            if (current && current.progress < 99) {
-              return { ...prev, [uploadKey]: { ...current, progress: Math.min(current.progress + 1, 99) } };
+        setUploadProgress(prev => {
+          const current = prev[uploadKey];
+          if (current && current.status === 'uploading') {
+            // 当进度达到95%以上时，自动增加到100%，改善用户体验
+            if (current.progress >= 95 && current.progress < 100) {
+              return { ...prev, [uploadKey]: { ...current, progress: 100 } };
+            } else if (current.progress < 95 && lastProgress < 95) {
+              return { ...prev, [uploadKey]: { ...current, progress: Math.min(current.progress + 1, 94) } };
             }
-            return prev;
-          });
-        }
-      }, 2000);
+          }
+          return prev;
+        });
+      }, 1500);
       
       // 直接上传到Supabase Storage（绕过Vercel限制）
       let uploadResult;

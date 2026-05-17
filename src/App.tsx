@@ -231,8 +231,15 @@ export default function App() {
   useEffect(() => {
     if (!user || materials.length === 0) return;
 
-    // Use a longer debounce for auto-sync to avoid hitting rate limits
-    const timer = setTimeout(() => syncToBackend(materials), 10000); 
+    // 使用更长的debounce时间（30秒）减少自动同步频率
+    // 只在材料数量或内容发生显著变化时触发自动同步
+    const timer = setTimeout(() => {
+      // 只有当材料数量大于0且至少有一个材料有音频URL时才自动同步
+      const hasAudioContent = materials.some(m => m.audioUrl);
+      if (hasAudioContent) {
+        syncToBackend(materials);
+      }
+    }, 30000); 
     return () => clearTimeout(timer);
   }, [materials, user]);
 
@@ -368,11 +375,12 @@ export default function App() {
     }
   }, [material.audioUrl]);
 
-  // 监听currentMaterialId变化，确保音频正确加载
+  // 音频元数据缓存，只缓存时长信息，避免缓存整个音频元素
+const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean }>>(new Map());
+
+// 监听currentMaterialId变化，确保音频正确加载
   useEffect(() => {
     if (currentMaterialId && audioRef.current) {
-      // 直接从materials数组中获取当前材料的音频URL，而不是依赖material状态
-      // 因为setMaterial是异步的，material状态可能还未更新
       const currentMaterial = materials.find(m => m.id === currentMaterialId);
       const audioUrl = currentMaterial?.audioUrl;
       
@@ -384,18 +392,30 @@ export default function App() {
         audioRef.current.pause();
         setIsPlaying(false);
         setCurrentTime(0);
-        setDuration(0); // 重置duration，等待新音频加载后更新
+        setDuration(0);
         setAudioLoading(true);
         setAudioError(null);
-        // 直接设置音频元素的src属性，确保立即更新
-        audioRef.current.src = audioUrl;
-        // 等待下一帧再加载，避免播放冲突
-        requestAnimationFrame(() => {
-          if (audioRef.current) {
-            audioRef.current.currentTime = 0;
-            audioRef.current.load();
-          }
-        });
+        
+        // 检查元数据缓存中是否已有该音频信息
+        const cachedMetadata = audioMetadataCache.current.get(audioUrl);
+        if (cachedMetadata && cachedMetadata.ready && cachedMetadata.duration > 0) {
+          console.log(`[Audio] 使用缓存的音频元数据，时长: ${cachedMetadata.duration}s`);
+          // 直接设置音频src，浏览器会从缓存加载
+          audioRef.current.src = audioUrl;
+          setDuration(cachedMetadata.duration);
+          // 延迟设置加载完成，给浏览器时间准备
+          setTimeout(() => setAudioLoading(false), 100);
+        } else {
+          console.log(`[Audio] 加载新音频`);
+          // 加载新音频
+          audioRef.current.src = audioUrl;
+          requestAnimationFrame(() => {
+            if (audioRef.current) {
+              audioRef.current.currentTime = 0;
+              audioRef.current.load();
+            }
+          });
+        }
       } else {
         console.warn(`[Audio] 警告: 当前材料没有音频URL，材料ID: ${currentMaterialId}`);
         setAudioError('当前材料没有音频文件');
@@ -961,6 +981,15 @@ export default function App() {
       setDuration(audio.duration);
       setAudioLoading(false);
       setAudioError(null);
+      
+      // 更新音频元数据缓存
+      if (audio.src) {
+        audioMetadataCache.current.set(audio.src, {
+          duration: audio.duration,
+          ready: true
+        });
+        console.log(`[Audio] 音频元数据已缓存，URL: ${audio.src}`);
+      }
     };
 
     const handleError = (e: Event) => {

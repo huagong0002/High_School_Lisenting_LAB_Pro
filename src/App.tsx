@@ -530,12 +530,12 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: { progress: number; status: 'uploading' | 'success' | 'error' } }>({});
   const [storageStats, setStorageStats] = useState<any>(null);
 
-  // 获取存储使用统计
+  // 获取存储使用统计（共享模式，显示所有用户的文件）
   const fetchStorageStats = async () => {
     if (!user) return;
     try {
-      // 尝试通过后端 API 获取（旧方法）
-      const response = await fetch(`${API_BASE}/api/storage/stats?userId=${user.id}`);
+      // 尝试通过后端 API 获取（使用共享模式）
+      const response = await fetch(`${API_BASE}/api/storage/stats?userId=${user.id}&shared=true`);
       if (response.ok) {
         const data = await response.json();
         setStorageStats(data);
@@ -545,10 +545,9 @@ export default function App() {
       console.warn('Failed to fetch storage stats via API, trying direct Supabase access:', e);
     }
     
-    // 备用方案：前端直接从 Supabase Storage 获取文件列表
+    // 备用方案：前端直接从 Supabase Storage 获取所有文件（共享模式）
     try {
-      const simpleUserId = user.id.replace(/-/g, '').slice(0, 8);
-      console.log(`[Storage Stats] 尝试直接从 Supabase 获取，用户ID: ${simpleUserId}`);
+      console.log(`[Storage Stats] 尝试直接从 Supabase 获取所有文件（共享模式）`);
       
       const { data: files, error } = await supabaseClient
         .storage
@@ -566,17 +565,15 @@ export default function App() {
       if (files && files.length > 0) {
         for (const file of files) {
           if (file.name && file.name.includes('.') && !file.name.startsWith('_')) {
-            // 检查是否属于当前用户（文件名以用户ID开头）
-            if (file.name.startsWith(simpleUserId)) {
-              const size = file.metadata?.size || file.size || 0;
-              totalSize += size;
-              fileList.push({
-                name: file.name,
-                size: size,
-                createdAt: file.created_at || file.metadata?.created_at,
-                path: file.name
-              });
-            }
+            // 共享模式：显示所有文件
+            const size = file.metadata?.size || file.size || 0;
+            totalSize += size;
+            fileList.push({
+              name: file.name,
+              size: size,
+              createdAt: file.created_at || file.metadata?.created_at,
+              path: file.name
+            });
           }
         }
       }

@@ -328,24 +328,15 @@ async function handleStorageStats(query: any) {
     return { error: '数据库未连接' };
   }
   
-  const { userId } = query;
-  if (!userId) {
-    console.error('Storage Stats Error: Missing userId');
-    return { error: '缺少用户ID' };
-  }
+  const { userId, shared } = query;
   
   try {
-    console.log(`[Storage Stats] Fetching files for userId: ${userId}`);
+    console.log(`[Storage Stats] Fetching files, userId: ${userId}, shared: ${shared}`);
     
     let totalSize = 0;
     const fileList: any[] = [];
     
-    // 获取用户ID的简化版本（用于匹配文件名）
-    const simpleUserId = String(userId).replace(/-/g, '').slice(0, 8);
-    
-    console.log(`[Storage Stats] 简化用户ID: ${simpleUserId}`);
-    
-    // 1. 首先尝试读取根目录（新的存储方式）
+    // 1. 读取根目录（新的存储方式）
     const { data: rootFiles, error: rootError } = await supabase
       .storage
       .from('audio-files')
@@ -360,8 +351,9 @@ async function handleStorageStats(query: any) {
         for (const item of rootFiles) {
           // 检查是否是文件（文件名包含点且不以下划线开头）
           if (item.name && item.name.includes('.') && !item.name.startsWith('_')) {
-            // 检查是否属于当前用户（文件名以用户ID开头）
-            if (item.name.startsWith(simpleUserId)) {
+            // 如果是共享模式，显示所有文件；否则只显示当前用户的文件
+            if (shared === 'true') {
+              // 共享模式：显示所有文件
               const size = item.metadata?.size || item.size || 0;
               totalSize += size;
               fileList.push({
@@ -370,6 +362,19 @@ async function handleStorageStats(query: any) {
                 createdAt: item.created_at || item.metadata?.created_at,
                 path: item.name
               });
+            } else if (userId) {
+              // 非共享模式：只显示当前用户的文件
+              const simpleUserId = String(userId).replace(/-/g, '').slice(0, 8);
+              if (item.name.startsWith(simpleUserId)) {
+                const size = item.metadata?.size || item.size || 0;
+                totalSize += size;
+                fileList.push({
+                  name: item.name,
+                  size: size,
+                  createdAt: item.created_at || item.metadata?.created_at,
+                  path: item.name
+                });
+              }
             }
           }
         }
@@ -377,48 +382,50 @@ async function handleStorageStats(query: any) {
     }
     
     // 2. 尝试旧的目录结构（保持向后兼容）
-    const possibleUserIds = [String(userId)];
-    if (userId.length > 10) {
-      possibleUserIds.push('1', userId.slice(-5));
-    }
-
-    for (const uid of possibleUserIds) {
-      console.log(`[Storage Stats] 尝试用户目录: ${uid}`);
-      
-      const { data: folders, error: foldersError } = await supabase
-        .storage
-        .from('audio-files')
-        .list(uid);
-
-      if (foldersError) {
-        console.warn('Storage Stats Warning (list folders):', foldersError.message);
-        continue;
+    if (userId) {
+      const possibleUserIds = [String(userId)];
+      if (userId.length > 10) {
+        possibleUserIds.push('1', userId.slice(-5));
       }
 
-      console.log(`[Storage Stats] 用户 ${uid} 找到 ${folders?.length || 0} 个文件夹`);
-      
-      if (folders && folders.length > 0) {
-        for (const folder of folders) {
-          if (folder.name && !folder.name.includes('.')) {
-            const { data: files, error: filesError } = await supabase
-              .storage
-              .from('audio-files')
-              .list(`${uid}/${folder.name}`);
+      for (const uid of possibleUserIds) {
+        console.log(`[Storage Stats] 尝试用户目录: ${uid}`);
+        
+        const { data: folders, error: foldersError } = await supabase
+          .storage
+          .from('audio-files')
+          .list(uid);
 
-            if (filesError) {
-              console.warn('Storage Stats Warning (list files in folder):', filesError.message);
-              continue;
-            }
+        if (foldersError) {
+          console.warn('Storage Stats Warning (list folders):', foldersError.message);
+          continue;
+        }
 
-            for (const file of files || []) {
-              const size = file.metadata?.size || file.size || 0;
-              totalSize += size;
-              fileList.push({
-                name: file.name,
-                size: size,
-                createdAt: file.created_at || file.metadata?.created_at,
-                path: `${uid}/${folder.name}/${file.name}`
-              });
+        console.log(`[Storage Stats] 用户 ${uid} 找到 ${folders?.length || 0} 个文件夹`);
+        
+        if (folders && folders.length > 0) {
+          for (const folder of folders) {
+            if (folder.name && !folder.name.includes('.')) {
+              const { data: files, error: filesError } = await supabase
+                .storage
+                .from('audio-files')
+                .list(`${uid}/${folder.name}`);
+
+              if (filesError) {
+                console.warn('Storage Stats Warning (list files in folder):', filesError.message);
+                continue;
+              }
+
+              for (const file of files || []) {
+                const size = file.metadata?.size || file.size || 0;
+                totalSize += size;
+                fileList.push({
+                  name: file.name,
+                  size: size,
+                  createdAt: file.created_at || file.metadata?.created_at,
+                  path: `${uid}/${folder.name}/${file.name}`
+                });
+              }
             }
           }
         }

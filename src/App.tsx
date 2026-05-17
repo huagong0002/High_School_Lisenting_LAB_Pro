@@ -243,36 +243,6 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [materials, user]);
 
-  // 预加载材料列表中的音频
-  useEffect(() => {
-    if (!user || materials.length === 0) return;
-    
-    // 获取所有有音频URL的材料
-    const materialsWithAudio = materials.filter(m => m.audioUrl);
-    
-    if (materialsWithAudio.length > 0) {
-      console.log(`[Audio] 开始预加载 ${materialsWithAudio.length} 个音频文件`);
-      
-      // 优先预加载当前选中的材料
-      if (currentMaterialId) {
-        const currentMat = materialsWithAudio.find(m => m.id === currentMaterialId);
-        if (currentMat) {
-          preloadAudio(currentMat.audioUrl!);
-        }
-      }
-      
-      // 预加载其他材料（延迟执行，避免阻塞）
-      setTimeout(() => {
-        materialsWithAudio.forEach((mat, index) => {
-          if (mat.id !== currentMaterialId) {
-            // 错开预加载时间，避免同时发起太多请求
-            setTimeout(() => preloadAudio(mat.audioUrl!), index * 500);
-          }
-        });
-      }, 1000);
-    }
-  }, [materials, currentMaterialId, preloadAudio]);
-
   // Sync current material changes back to local materials list
   useEffect(() => {
     if (!material) return;
@@ -387,6 +357,71 @@ export default function App() {
   // 使用ref存储最新的audioUrl，解决闭包问题
   const latestAudioUrlRef = useRef<string | undefined>(material.audioUrl);
   
+  // 音频元数据缓存，只缓存时长信息，避免缓存整个音频元素
+  const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean }>>(new Map());
+  
+  // 预加载音频的辅助函数
+  const preloadAudio = useCallback((audioUrl: string) => {
+    if (!audioUrl || audioMetadataCache.current.has(audioUrl)) {
+      return; // 已经缓存或URL为空
+    }
+    
+    console.log(`[Audio] 开始预加载音频: ${audioUrl}`);
+    
+    const tempAudio = new Audio(audioUrl);
+    tempAudio.crossOrigin = 'anonymous';
+    tempAudio.preload = 'auto';
+    
+    tempAudio.addEventListener('loadedmetadata', () => {
+      audioMetadataCache.current.set(audioUrl, {
+        duration: tempAudio.duration,
+        ready: true
+      });
+      console.log(`[Audio] 预加载完成，时长: ${tempAudio.duration}s`);
+      tempAudio.src = '';
+    });
+    
+    tempAudio.addEventListener('error', () => {
+      console.warn(`[Audio] 预加载失败: ${audioUrl}`);
+      tempAudio.src = '';
+    });
+    
+    setTimeout(() => {
+      if (!audioMetadataCache.current.get(audioUrl)?.ready) {
+        console.log(`[Audio] 预加载超时: ${audioUrl}`);
+        tempAudio.src = '';
+      }
+    }, 10000);
+    
+    tempAudio.load();
+  }, []);
+  
+  // 预加载材料列表中的音频（在preloadAudio定义之后）
+  useEffect(() => {
+    if (!user || materials.length === 0) return;
+    
+    const materialsWithAudio = materials.filter(m => m.audioUrl);
+    
+    if (materialsWithAudio.length > 0) {
+      console.log(`[Audio] 开始预加载 ${materialsWithAudio.length} 个音频文件`);
+      
+      if (currentMaterialId) {
+        const currentMat = materialsWithAudio.find(m => m.id === currentMaterialId);
+        if (currentMat) {
+          preloadAudio(currentMat.audioUrl!);
+        }
+      }
+      
+      setTimeout(() => {
+        materialsWithAudio.forEach((mat, index) => {
+          if (mat.id !== currentMaterialId) {
+            setTimeout(() => preloadAudio(mat.audioUrl!), index * 500);
+          }
+        });
+      }, 1000);
+    }
+  }, [materials, currentMaterialId, preloadAudio]);
+  
   useEffect(() => {
     latestAudioUrlRef.current = material.audioUrl;
   }, [material.audioUrl]);
@@ -397,7 +432,6 @@ export default function App() {
       console.log(`[Audio] 重新加载音频: ${material.audioUrl}`);
       audioRef.current.pause();
       setIsPlaying(false);
-      // 等待下一帧再加载，避免播放冲突
       requestAnimationFrame(() => {
         if (audioRef.current) {
           audioRef.current.load();
@@ -406,48 +440,7 @@ export default function App() {
     }
   }, [material.audioUrl]);
 
-  // 音频元数据缓存，只缓存时长信息，避免缓存整个音频元素
-const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean }>>(new Map());
-
-// 预加载音频的辅助函数
-const preloadAudio = useCallback((audioUrl: string) => {
-  if (!audioUrl || audioMetadataCache.current.has(audioUrl)) {
-    return; // 已经缓存或URL为空
-  }
-  
-  console.log(`[Audio] 开始预加载音频: ${audioUrl}`);
-  
-  const tempAudio = new Audio(audioUrl);
-  tempAudio.crossOrigin = 'anonymous';
-  tempAudio.preload = 'auto';
-  
-  tempAudio.addEventListener('loadedmetadata', () => {
-    audioMetadataCache.current.set(audioUrl, {
-      duration: tempAudio.duration,
-      ready: true
-    });
-    console.log(`[Audio] 预加载完成，时长: ${tempAudio.duration}s`);
-    // 释放临时音频对象
-    tempAudio.src = '';
-  });
-  
-  tempAudio.addEventListener('error', () => {
-    console.warn(`[Audio] 预加载失败: ${audioUrl}`);
-    tempAudio.src = '';
-  });
-  
-  // 设置超时，避免长时间等待
-  setTimeout(() => {
-    if (!audioMetadataCache.current.get(audioUrl)?.ready) {
-      console.log(`[Audio] 预加载超时: ${audioUrl}`);
-      tempAudio.src = '';
-    }
-  }, 10000);
-  
-  tempAudio.load();
-}, []);
-
-// 监听currentMaterialId变化，确保音频正确加载
+  // 监听currentMaterialId变化，确保音频正确加载
   useEffect(() => {
     if (currentMaterialId && audioRef.current) {
       const currentMaterial = materials.find(m => m.id === currentMaterialId);

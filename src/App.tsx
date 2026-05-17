@@ -110,6 +110,12 @@ export default function App() {
     
     try {
       setLastSaved('同步中...');
+      console.log(`[Sync] 开始同步 ${dataToSync.length} 个材料到后端`);
+      // 检查每个材料的audioUrl状态
+      dataToSync.forEach((m: any, i: number) => {
+        console.log(`[Sync] 材料 ${i+1}: ID=${m.id}, audioUrl=${m.audioUrl ? '存在' : '空'}`);
+      });
+      
       const response = await fetch(`${API_BASE}/api/materials/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -119,13 +125,16 @@ export default function App() {
       });
       
       if (response.ok) {
+        const result = await response.json();
+        console.log(`[Sync] 同步成功:`, result);
         localStorage.setItem(`echomaster_library_shared`, JSON.stringify(dataToSync));
         setLastSaved(new Date().toLocaleTimeString());
       } else {
+        console.error(`[Sync] 同步失败，状态码: ${response.status}`);
         setLastSaved('同步失败');
       }
     } catch (e: any) {
-      console.error("Backend Sync Error", e);
+      console.error("[Sync] Backend Sync Error", e);
       setLastSaved('网络异常');
     }
   };
@@ -818,15 +827,50 @@ export default function App() {
       // 3. 更新为云端 URL
       setMaterial(prev => ({ ...prev, audioUrl: cloudUrl }));
       
-      // 4. 立即保存更新后的材料（直接传递更新后的数据）
+      // 4. 立即保存更新后的材料（使用setMaterials回调获取最新状态）
+      // 将需要的值保存到闭包外部，避免闭包捕获过期状态
+      const materialId = material.id;
+      const materialTitle = material.title;
+      const materialScript = material.script;
+      const materialSegments = material.segments;
+      const userIdValue = user?.id || '';
+      
       setTimeout(() => {
         console.log(`[Upload] 准备保存，云端URL: ${cloudUrl}`);
-        // 直接更新materials数组并保存，绕过异步状态更新问题
-        const updatedMaterials = materials.map(m => 
-          m.id === material.id ? { ...material, audioUrl: cloudUrl, lastModified: Date.now() } : m
-        );
-        setMaterials(updatedMaterials);
-        syncToBackend(updatedMaterials);
+        console.log(`[Upload] 材料ID: ${materialId}`);
+        
+        // 使用setMaterials的回调形式，确保获取最新的materials状态
+        setMaterials(prevMaterials => {
+          // 检查当前材料是否已经在数组中
+          const existingIndex = prevMaterials.findIndex(m => m.id === materialId);
+          
+          let updated: typeof prevMaterials;
+          
+          if (existingIndex >= 0) {
+            // 材料已存在，更新它
+            updated = prevMaterials.map(m => 
+              m.id === materialId ? { ...m, audioUrl: cloudUrl, lastModified: Date.now() } : m
+            );
+            console.log(`[Upload] 更新现有材料，索引: ${existingIndex}`);
+          } else {
+            // 材料不存在于数组中，添加它
+            const updatedMaterial: ListeningMaterial = {
+              id: materialId,
+              title: materialTitle,
+              audioUrl: cloudUrl,
+              script: materialScript,
+              segments: materialSegments,
+              lastModified: Date.now(),
+              userId: userIdValue
+            };
+            updated = [...prevMaterials, updatedMaterial];
+            console.log(`[Upload] 添加新材料到数组`);
+          }
+          
+          // 立即同步到后端
+          syncToBackend(updated);
+          return updated;
+        });
       }, 500);
     } else {
       console.warn('[Upload] 上传失败，保持本地预览');

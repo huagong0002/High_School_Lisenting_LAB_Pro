@@ -461,6 +461,14 @@ export default function App() {
       console.log(`[Audio] 音频URL: ${audioUrl}`);
       
       if (audioUrl) {
+        // 检查是否是 blob URL，如果是则不加载（等待云端URL）
+        if (audioUrl.startsWith('blob:')) {
+          console.log(`[Audio] 检测到blob URL，等待云端URL上传完成`);
+          setAudioLoading(true);
+          setAudioError('音频上传中，请稍候...');
+          return;
+        }
+        
         audioRef.current.pause();
         setIsPlaying(false);
         setCurrentTime(0);
@@ -1124,8 +1132,8 @@ export default function App() {
       console.error(`[Audio] 当前src: ${target.src}`);
       setAudioError(errorMsg);
       setAudioLoading(false);
-      // 尝试重新加载
-      if (target.src) {
+      // 如果是 blob URL，不要尝试重新加载（会触发安全错误）
+      if (target.src && !target.src.startsWith('blob:')) {
         console.log(`[Audio] 尝试重新加载音频: ${target.src}`);
         target.load();
       }

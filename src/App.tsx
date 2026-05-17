@@ -142,6 +142,51 @@ export default function App() {
     }
   };
 
+  // 带重试机制的同步函数
+  const syncToBackendWithRetry = async (dataToSync: any[], maxRetries: number = 3) => {
+    let retries = 0;
+    let success = false;
+    
+    while (retries < maxRetries && !success) {
+      try {
+        console.log(`[Sync] 尝试同步 (第 ${retries + 1} 次)`);
+        const response = await fetch(`${API_BASE}/api/materials/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ materials: dataToSync, userId: user?.id }),
+          mode: 'cors',
+          credentials: API_BASE ? 'include' : 'same-origin'
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log(`[Sync] 同步成功 (第 ${retries + 1} 次):`, result);
+          localStorage.setItem(`echomaster_library_shared`, JSON.stringify(dataToSync));
+          setLastSaved(new Date().toLocaleTimeString());
+          success = true;
+        } else {
+          console.error(`[Sync] 同步失败，状态码: ${response.status}`);
+        }
+      } catch (e: any) {
+        console.error(`[Sync] 同步异常 (第 ${retries + 1} 次):`, e);
+      }
+      
+      if (!success && retries < maxRetries - 1) {
+        const delay = Math.pow(2, retries) * 1000;
+        console.log(`[Sync] 等待 ${delay}ms 后重试...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retries++;
+      } else {
+        retries = maxRetries;
+      }
+    }
+    
+    if (!success) {
+      console.error(`[Sync] 同步失败，已达到最大重试次数 ${maxRetries}`);
+      setLastSaved('同步失败');
+    }
+  };
+
   const fetchLibrary = async () => {
     if (!user) return;
     try {
@@ -1005,8 +1050,8 @@ export default function App() {
           console.log(`[Upload] 添加新材料到数组`);
         }
         
-        // 立即同步到后端
-        syncToBackend(updated);
+        // 立即同步到后端（添加重试机制）
+        syncToBackendWithRetry(updated, 3);
         
         // 同时更新localStorage，确保刷新页面后数据不丢失
         // 过滤掉没有实际内容的材料
@@ -1016,8 +1061,29 @@ export default function App() {
         
         return updated;
       });
+      
+      // 5. 验证上传结果：检查后端是否正确保存了URL
+      setTimeout(async () => {
+        try {
+          const response = await fetch(`${API_BASE}/api/materials`);
+          if (response.ok) {
+            const materialsFromBackend = await response.json();
+            const savedMaterial = materialsFromBackend.find((m: any) => m.id === material.id);
+            if (savedMaterial && !savedMaterial.audioUrl) {
+              console.error('[Upload] 警告：数据库中audioUrl为空，尝试重新同步');
+              // 尝试重新同步当前材料
+              syncToBackendWithRetry([{ ...material, audioUrl: cloudUrl }], 2);
+            }
+          }
+        } catch (e) {
+          console.error('[Upload] 验证失败:', e);
+        }
+      }, 3000);
     } else {
-      console.warn('[Upload] 上传失败，保持本地预览');
+      console.warn('[Upload] 上传失败，清理临时blob URL');
+      // 上传失败，清理临时blob URL
+      setMaterial(prev => ({ ...prev, audioUrl: '' }));
+      URL.revokeObjectURL(localUrl);
     }
 
     if (mode === 'setup') setMode('edit');

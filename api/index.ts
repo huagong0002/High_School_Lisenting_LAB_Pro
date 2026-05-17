@@ -228,11 +228,18 @@ async function handleSyncMaterials(body: any) {
     return { error: '数据格式不正确或缺少用户ID' };
   }
 
+  // 过滤掉没有实际内容的空材料（标题为"未命名听力材料"且没有音频、分段或脚本）
+  const filteredMaterials = materials.filter((m: any) => {
+    return m.title !== '未命名听力材料' || m.audioUrl || (Array.isArray(m.segments) && m.segments.length > 0) || m.script;
+  });
+
+  console.log(`[Sync] 原始材料数: ${materials.length}, 过滤后: ${filteredMaterials.length}`);
+
   if (!supabase) {
     console.warn('⚠️ Database not connected, using memory fallback');
     try {
-      LOCAL_STORE[userId] = materials;
-      return { success: true, count: materials.length, storedIn: 'memory' };
+      LOCAL_STORE[userId] = filteredMaterials;
+      return { success: true, count: filteredMaterials.length, storedIn: 'memory' };
     } catch (err) {
       console.error('Memory Storage Error:', err);
       return { error: '内存存储失败' };
@@ -240,7 +247,7 @@ async function handleSyncMaterials(body: any) {
   }
 
   try {
-    const records = materials.map((m: any) => ({
+    const records = filteredMaterials.map((m: any) => ({
       id: m.id,
       user_id: userId,
       title: m.title || 'Untitled',

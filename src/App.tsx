@@ -495,17 +495,29 @@ export default function App() {
     }
   }, [material.audioUrl]);
 
+  // 保存当前音频URL，用于检测是否需要重新加载
+  const currentAudioUrlRef = useRef<string | null>(null);
+
   // 监听currentMaterialId变化，确保音频正确加载
   useEffect(() => {
     if (currentMaterialId && audioRef.current) {
       const currentMaterial = materials.find(m => m.id === currentMaterialId);
       const audioUrl = currentMaterial?.audioUrl;
       
+      // 只有当音频URL真正改变时才重新加载
+      if (audioUrl && audioUrl === currentAudioUrlRef.current) {
+        console.log(`[Audio] 音频URL未变化，跳过重新加载`);
+        return;
+      }
+      
       console.log(`[Audio] 材料切换 - 材料ID: ${currentMaterialId}`);
       console.log(`[Audio] 当前材料:`, currentMaterial);
       console.log(`[Audio] 音频URL: ${audioUrl}`);
       
       if (audioUrl) {
+        // 更新当前音频URL引用
+        currentAudioUrlRef.current = audioUrl;
+        
         // 检查是否是 blob URL，如果是则不加载（等待云端URL）
         if (audioUrl.startsWith('blob:')) {
           console.log(`[Audio] 检测到blob URL，等待云端URL上传完成`);

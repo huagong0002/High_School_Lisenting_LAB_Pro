@@ -321,6 +321,8 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
   
   // 使用ref存储最新的audioUrl，解决闭包问题
   const latestAudioUrlRef = useRef<string | undefined>(material.audioUrl);
@@ -352,13 +354,17 @@ export default function App() {
       const currentMaterial = materials.find(m => m.id === currentMaterialId);
       const audioUrl = currentMaterial?.audioUrl;
       
-      console.log(`[Audio] 材料切换，重新加载音频: ${audioUrl}`);
+      console.log(`[Audio] 材料切换 - 材料ID: ${currentMaterialId}`);
+      console.log(`[Audio] 当前材料:`, currentMaterial);
+      console.log(`[Audio] 音频URL: ${audioUrl}`);
       
       if (audioUrl) {
         audioRef.current.pause();
         setIsPlaying(false);
         setCurrentTime(0);
         setDuration(0); // 重置duration，等待新音频加载后更新
+        setAudioLoading(true);
+        setAudioError(null);
         // 直接设置音频元素的src属性，确保立即更新
         audioRef.current.src = audioUrl;
         // 等待下一帧再加载，避免播放冲突
@@ -368,6 +374,10 @@ export default function App() {
             audioRef.current.load();
           }
         });
+      } else {
+        console.warn(`[Audio] 警告: 当前材料没有音频URL，材料ID: ${currentMaterialId}`);
+        setAudioError('当前材料没有音频文件');
+        setAudioLoading(false);
       }
     }
   }, [currentMaterialId, materials]);
@@ -885,17 +895,51 @@ export default function App() {
     };
 
     const handleLoadedMetadata = () => {
+      console.log(`[Audio] 音频元数据加载完成，时长: ${audio.duration}s`);
       setDuration(audio.duration);
+      setAudioLoading(false);
+      setAudioError(null);
+    };
+
+    const handleError = (e: Event) => {
+      const target = e.target as HTMLAudioElement;
+      const errorMsg = target.error?.message || '音频加载失败';
+      console.error(`[Audio] 音频加载错误: ${errorMsg}`);
+      console.error(`[Audio] 错误码: ${target.error?.code}`);
+      console.error(`[Audio] 当前src: ${target.src}`);
+      setAudioError(errorMsg);
+      setAudioLoading(false);
+      // 尝试重新加载
+      if (target.src) {
+        console.log(`[Audio] 尝试重新加载音频: ${target.src}`);
+        target.load();
+      }
+    };
+
+    const handleAbort = () => {
+      console.warn(`[Audio] 音频加载被中止`);
+      setAudioLoading(false);
+    };
+    
+    const handleCanPlay = () => {
+      console.log(`[Audio] 音频可以播放了`);
+      setAudioLoading(false);
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('error', handleError);
+    audio.addEventListener('abort', handleAbort);
+    audio.addEventListener('canplay', handleCanPlay);
     audio.addEventListener('play', () => setIsPlaying(true));
     audio.addEventListener('pause', () => setIsPlaying(false));
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('error', handleError);
+      audio.removeEventListener('abort', handleAbort);
+      audio.removeEventListener('canplay', handleCanPlay);
     };
   }, [material.segments, mode, activeSegmentIndex]);
 
@@ -1777,6 +1821,13 @@ export default function App() {
                         <p className="text-white font-bold truncate">
                           {activeSegmentIndex !== null ? material.segments[activeSegmentIndex].label : "自由浏览中..."}
                         </p>
+                        {/* 音频加载状态 */}
+                        {audioLoading && (
+                          <span className="text-[10px] font-mono text-amber-400">加载中...</span>
+                        )}
+                        {audioError && (
+                          <span className="text-[10px] font-mono text-red-400">{audioError}</span>
+                        )}
                       </div>
 
                       {/* Center Controls */}

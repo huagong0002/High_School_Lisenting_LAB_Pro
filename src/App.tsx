@@ -108,18 +108,21 @@ export default function App() {
     const syncToBackend = async (dataToSync = materials) => {
     if (!user || !dataToSync) return;
     
+    // 过滤掉没有实际内容的材料
+    const filteredData = dataToSync.filter(m => m.title !== '未命名听力材料' || m.audioUrl || m.segments.length > 0 || m.script);
+    
     try {
       setLastSaved('同步中...');
-      console.log(`[Sync] 开始同步 ${dataToSync.length} 个材料到后端`);
+      console.log(`[Sync] 开始同步 ${filteredData.length} 个材料到后端`);
       // 检查每个材料的audioUrl状态
-      dataToSync.forEach((m: any, i: number) => {
+      filteredData.forEach((m: any, i: number) => {
         console.log(`[Sync] 材料 ${i+1}: ID=${m.id}, audioUrl=${m.audioUrl ? '存在' : '空'}`);
       });
       
       const response = await fetch(`${API_BASE}/api/materials/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ materials: dataToSync, userId: user.id }),
+        body: JSON.stringify({ materials: filteredData, userId: user.id }),
         mode: 'cors',
         credentials: API_BASE ? 'include' : 'same-origin'
       });
@@ -153,11 +156,14 @@ export default function App() {
         const data = await response.json();
         console.log(`[Library] 从后端获取到 ${data?.length || 0} 个材料`);
         if (Array.isArray(data)) {
+          // 过滤掉没有实际内容的空材料
+          const filteredData = data.filter(m => m.title !== '未命名听力材料' || m.audioUrl || m.segments?.length > 0 || m.script);
+          console.log(`[Library] 过滤后保留 ${filteredData.length} 个材料`);
           // 检查每个材料的audioUrl状态
-          data.forEach((m: any, index: number) => {
+          filteredData.forEach((m: any, index: number) => {
             console.log(`[Library] 材料 ${index + 1}: ID=${m.id}, 标题=${m.title}, audioUrl=${m.audioUrl ? '存在' : '空'}`);
           });
-          setMaterials(data);
+          setMaterials(filteredData);
           setLastSaved(new Date().toLocaleTimeString());
         }
       } else {
@@ -169,8 +175,10 @@ export default function App() {
       const savedLibrary = localStorage.getItem(`echomaster_library_shared`);
       if (savedLibrary) {
         const localData = JSON.parse(savedLibrary);
-        console.log(`[Library] 从本地存储恢复 ${localData?.length || 0} 个材料`);
-        setMaterials(localData);
+        // 过滤掉没有实际内容的空材料
+        const filteredData = localData.filter((m: any) => m.title !== '未命名听力材料' || m.audioUrl || m.segments?.length > 0 || m.script);
+        console.log(`[Library] 从本地存储恢复 ${filteredData.length} 个材料`);
+        setMaterials(filteredData);
       }
     }
   };
@@ -191,6 +199,12 @@ export default function App() {
     
     // 只保存有实际内容的材料（避免保存默认的空材料）
     if (material.title === '未命名听力材料' && !material.audioUrl && material.segments.length === 0 && !material.script) {
+      return;
+    }
+    
+    // 不要保存 blob URL，只保存云端URL
+    if (material.audioUrl && material.audioUrl.startsWith('blob:')) {
+      console.log(`[AutoSave] 检测到blob URL，跳过保存`);
       return;
     }
     
@@ -626,7 +640,12 @@ export default function App() {
         console.log('[App] 页面隐藏');
         // 页面隐藏时，保存当前材料到localStorage，但不停止音频
         // 只保存有实际内容的材料（避免保存默认的空材料）
+        // 不要保存 blob URL，只保存云端URL
         if (material && material.id && (material.title !== '未命名听力材料' || material.audioUrl || material.segments.length > 0 || material.script)) {
+          if (material.audioUrl && material.audioUrl.startsWith('blob:')) {
+            console.log('[App] 页面隐藏 - 检测到blob URL，跳过保存');
+            return;
+          }
           const libraryKey = `echomaster_library_shared`;
           const savedLibrary = localStorage.getItem(libraryKey);
           let currentLibrary = savedLibrary ? JSON.parse(savedLibrary) : [];
@@ -982,7 +1001,9 @@ export default function App() {
         syncToBackend(updated);
         
         // 同时更新localStorage，确保刷新页面后数据不丢失
-        localStorage.setItem(`echomaster_library_shared`, JSON.stringify(updated));
+        // 过滤掉没有实际内容的材料
+        const filtered = updated.filter(m => m.title !== '未命名听力材料' || m.audioUrl || m.segments.length > 0 || m.script);
+        localStorage.setItem(`echomaster_library_shared`, JSON.stringify(filtered));
         console.log('[Upload] 材料已保存到localStorage');
         
         return updated;

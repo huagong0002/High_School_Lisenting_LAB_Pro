@@ -548,10 +548,10 @@ export default function App() {
     }
   }, []);
 
-  // Check for saved user session and server health
+  // Restore saved state on mount
   useEffect(() => {
     const savedUser = localStorage.getItem('echomaster_user');
-    if (savedUser) {
+    if (savedUser && !user) {
       try {
         setUser(JSON.parse(savedUser));
       } catch (e) {
@@ -560,8 +560,24 @@ export default function App() {
     }
     
     const savedId = localStorage.getItem('echomaster_current_id');
-    if (savedId) setCurrentMaterialId(savedId);
-  }, []);
+    if (savedId && !currentMaterialId) setCurrentMaterialId(savedId);
+    
+    // Handle visibility change to refresh UI
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('[App] 页面隐藏');
+      } else {
+        console.log('[App] 页面显示');
+        // 页面重新显示时，强制触发一次重渲染
+        if (user) {
+          fetchLibrary();
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [user]);
 
   const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null);
   const [showSubtitles, setShowSubtitles] = useState(true);
@@ -829,57 +845,54 @@ export default function App() {
     // 2. 上传到云端（使用材料标题作为文件名）
     const cloudUrl = await uploadAudioToCloud(file, material.id, material.title);
     
+    console.log(`[Upload] uploadAudioToCloud 返回: ${cloudUrl}`);
+    
     if (cloudUrl) {
       console.log(`[Upload] 更新audioUrl为云端地址: ${cloudUrl}`);
       
-      // 3. 更新为云端 URL
-      setMaterial(prev => ({ ...prev, audioUrl: cloudUrl }));
+      // 3. 更新为云端 URL（使用回调确保状态正确）
+      setMaterial(prev => {
+        const updated = { ...prev, audioUrl: cloudUrl };
+        console.log(`[Upload] 材料audioUrl已更新: ${updated.audioUrl}`);
+        return updated;
+      });
       
       // 4. 立即保存更新后的材料（使用setMaterials回调获取最新状态）
-      // 将需要的值保存到闭包外部，避免闭包捕获过期状态
       const materialId = material.id;
       const materialTitle = material.title;
       const materialScript = material.script;
       const materialSegments = material.segments;
       const userIdValue = user?.id || '';
       
-      setTimeout(() => {
-        console.log(`[Upload] 准备保存，云端URL: ${cloudUrl}`);
-        console.log(`[Upload] 材料ID: ${materialId}`);
+      // 立即保存到材料列表，不延迟
+      setMaterials(prevMaterials => {
+        const existingIndex = prevMaterials.findIndex(m => m.id === materialId);
         
-        // 使用setMaterials的回调形式，确保获取最新的materials状态
-        setMaterials(prevMaterials => {
-          // 检查当前材料是否已经在数组中
-          const existingIndex = prevMaterials.findIndex(m => m.id === materialId);
-          
-          let updated: typeof prevMaterials;
-          
-          if (existingIndex >= 0) {
-            // 材料已存在，更新它
-            updated = prevMaterials.map(m => 
-              m.id === materialId ? { ...m, audioUrl: cloudUrl, lastModified: Date.now() } : m
-            );
-            console.log(`[Upload] 更新现有材料，索引: ${existingIndex}`);
-          } else {
-            // 材料不存在于数组中，添加它
-            const updatedMaterial: ListeningMaterial = {
-              id: materialId,
-              title: materialTitle,
-              audioUrl: cloudUrl,
-              script: materialScript,
-              segments: materialSegments,
-              lastModified: Date.now(),
-              userId: userIdValue
-            };
-            updated = [...prevMaterials, updatedMaterial];
-            console.log(`[Upload] 添加新材料到数组`);
-          }
-          
-          // 立即同步到后端
-          syncToBackend(updated);
-          return updated;
-        });
-      }, 500);
+        let updated: typeof prevMaterials;
+        
+        if (existingIndex >= 0) {
+          updated = prevMaterials.map(m => 
+            m.id === materialId ? { ...m, audioUrl: cloudUrl, lastModified: Date.now() } : m
+          );
+          console.log(`[Upload] 更新现有材料，索引: ${existingIndex}`);
+        } else {
+          const updatedMaterial: ListeningMaterial = {
+            id: materialId,
+            title: materialTitle,
+            audioUrl: cloudUrl,
+            script: materialScript,
+            segments: materialSegments,
+            lastModified: Date.now(),
+            userId: userIdValue
+          };
+          updated = [...prevMaterials, updatedMaterial];
+          console.log(`[Upload] 添加新材料到数组`);
+        }
+        
+        // 立即同步到后端
+        syncToBackend(updated);
+        return updated;
+      });
     } else {
       console.warn('[Upload] 上传失败，保持本地预览');
     }

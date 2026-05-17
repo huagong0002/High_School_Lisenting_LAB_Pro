@@ -191,40 +191,44 @@ export default function App() {
     
     console.log(`[AutoSave] 材料变化，自动保存中... ID: ${material.id}`);
     
-    // Save to localStorage immediately
-    setMaterials(prev => {
-      const existingIndex = prev.findIndex(m => m.id === material.id);
-      let updated = prev;
-      if (existingIndex >= 0) {
-        updated = prev.map(m => m.id === material.id ? { ...material, lastModified: Date.now() } : m);
-      } else {
-        updated = [...prev, { ...material, lastModified: Date.now() }];
-      }
-      localStorage.setItem(`echomaster_library_shared`, JSON.stringify(updated));
-      return updated;
-    });
+    // Save to localStorage immediately (不更新materials状态，避免触发无限循环)
+    const libraryKey = `echomaster_library_shared`;
+    const savedLibrary = localStorage.getItem(libraryKey);
+    let currentLibrary = savedLibrary ? JSON.parse(savedLibrary) : [];
     
-    // Debounce sync to backend (only sync after 2 seconds of inactivity)
+    const existingIndex = currentLibrary.findIndex((m: any) => m.id === material.id);
+    if (existingIndex >= 0) {
+      currentLibrary[existingIndex] = { ...material, lastModified: Date.now() };
+    } else {
+      currentLibrary.push({ ...material, lastModified: Date.now() });
+    }
+    localStorage.setItem(libraryKey, JSON.stringify(currentLibrary));
+    
+    // Debounce sync to backend (only sync after 3 seconds of inactivity)
     const debounceTimer = setTimeout(() => {
-      setMaterials(current => {
-        syncToBackend(current);
-        return current;
-      });
-    }, 2000);
+      console.log(`[AutoSave] 同步到后端`);
+      syncToBackend(currentLibrary);
+    }, 3000);
     
     return () => clearTimeout(debounceTimer);
   }, [material, user]);
 
   // Update effect for material selection
   useEffect(() => {
-    if (currentMaterialId) {
-      const active = materials.find(m => m.id === currentMaterialId);
-      // Only update if the object in library is different or contains new data to avoid infinite loops
-      if (active && JSON.stringify(active) !== JSON.stringify(material)) {
-        setMaterial(active);
-      }
-      localStorage.setItem('echomaster_current_id', currentMaterialId);
+    if (!currentMaterialId || !materials.length) return;
+    
+    const active = materials.find(m => m.id === currentMaterialId);
+    if (!active) return;
+    
+    // 只有当材料确实不同时才更新，避免无限循环
+    // 使用 audioUrl 作为判断依据，因为这是最重要的属性
+    if (material && material.id === active.id && material.audioUrl === active.audioUrl) {
+      return; // 材料相同，不需要更新
     }
+    
+    console.log(`[MaterialSwitch] 切换到材料: ${active.id}`);
+    setMaterial(active);
+    localStorage.setItem('echomaster_current_id', currentMaterialId);
   }, [currentMaterialId, materials]);
 
   // Debug: Check Backend Health

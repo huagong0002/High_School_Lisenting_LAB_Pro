@@ -346,20 +346,31 @@ export default function App() {
 
   // 监听currentMaterialId变化，确保音频正确加载
   useEffect(() => {
-    if (currentMaterialId && audioRef.current && material.audioUrl) {
-      console.log(`[Audio] 材料切换，重新加载音频: ${material.audioUrl}`);
-      audioRef.current.pause();
-      setIsPlaying(false);
-      setCurrentTime(0);
-      // 等待下一帧再加载，避免播放冲突
-      requestAnimationFrame(() => {
-        if (audioRef.current) {
-          audioRef.current.currentTime = 0;
-          audioRef.current.load();
-        }
-      });
+    if (currentMaterialId && audioRef.current) {
+      // 直接从materials数组中获取当前材料的音频URL，而不是依赖material状态
+      // 因为setMaterial是异步的，material状态可能还未更新
+      const currentMaterial = materials.find(m => m.id === currentMaterialId);
+      const audioUrl = currentMaterial?.audioUrl;
+      
+      console.log(`[Audio] 材料切换，重新加载音频: ${audioUrl}`);
+      
+      if (audioUrl) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+        setCurrentTime(0);
+        setDuration(0); // 重置duration，等待新音频加载后更新
+        // 直接设置音频元素的src属性，确保立即更新
+        audioRef.current.src = audioUrl;
+        // 等待下一帧再加载，避免播放冲突
+        requestAnimationFrame(() => {
+          if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.load();
+          }
+        });
+      }
     }
-  }, [currentMaterialId]);
+  }, [currentMaterialId, materials]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

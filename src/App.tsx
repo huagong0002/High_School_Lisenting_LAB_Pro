@@ -134,6 +134,7 @@ export default function App() {
     if (!user) return;
     try {
       setLastSaved('正在同步...');
+      console.log(`[Library] 开始从后端获取材料列表...`);
       // 获取所有共享材料（不按用户ID过滤）
       const response = await fetch(`${API_BASE}/api/materials`, {
         mode: 'cors',
@@ -141,16 +142,27 @@ export default function App() {
       });
       if (response.ok) {
         const data = await response.json();
+        console.log(`[Library] 从后端获取到 ${data?.length || 0} 个材料`);
         if (Array.isArray(data)) {
+          // 检查每个材料的audioUrl状态
+          data.forEach((m: any, index: number) => {
+            console.log(`[Library] 材料 ${index + 1}: ID=${m.id}, 标题=${m.title}, audioUrl=${m.audioUrl ? '存在' : '空'}`);
+          });
           setMaterials(data);
           setLastSaved(new Date().toLocaleTimeString());
         }
+      } else {
+        console.error(`[Library] 获取材料失败，状态码: ${response.status}`);
       }
     } catch (e: any) {
-      console.error("Backend Library Refresh Error", e);
+      console.error("[Library] Backend Library Refresh Error", e);
       setLastSaved('同步失败');
       const savedLibrary = localStorage.getItem(`echomaster_library_shared`);
-      if (savedLibrary) setMaterials(JSON.parse(savedLibrary));
+      if (savedLibrary) {
+        const localData = JSON.parse(savedLibrary);
+        console.log(`[Library] 从本地存储恢复 ${localData?.length || 0} 个材料`);
+        setMaterials(localData);
+      }
     }
   };
 
@@ -160,6 +172,7 @@ export default function App() {
       setMaterials([]);
       return;
     }
+    console.log(`[Library] 用户登录，开始加载材料库，用户ID: ${user.id}`);
     fetchLibrary();
   }, [user]);
 
@@ -805,10 +818,15 @@ export default function App() {
       // 3. 更新为云端 URL
       setMaterial(prev => ({ ...prev, audioUrl: cloudUrl }));
       
-      // 4. 自动保存（使用ref获取最新状态，避免闭包问题）
+      // 4. 立即保存更新后的材料（直接传递更新后的数据）
       setTimeout(() => {
-        console.log(`[Upload] 准备保存，当前audioUrl(ref): ${latestAudioUrlRef.current}`);
-        handleImmediateSave();
+        console.log(`[Upload] 准备保存，云端URL: ${cloudUrl}`);
+        // 直接更新materials数组并保存，绕过异步状态更新问题
+        const updatedMaterials = materials.map(m => 
+          m.id === material.id ? { ...material, audioUrl: cloudUrl, lastModified: Date.now() } : m
+        );
+        setMaterials(updatedMaterials);
+        syncToBackend(updatedMaterials);
       }, 500);
     } else {
       console.warn('[Upload] 上传失败，保持本地预览');

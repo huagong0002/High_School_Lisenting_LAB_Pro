@@ -1208,11 +1208,31 @@ export default function App() {
     const handleAbort = () => {
       console.warn(`[Audio] 音频加载被中止`);
       setAudioLoading(false);
+      // 尝试重新加载音频（如果不是blob URL）
+      if (audio.src && !audio.src.startsWith('blob:')) {
+        console.log(`[Audio] 尝试重新加载被中止的音频: ${audio.src}`);
+        setTimeout(() => {
+          if (audioRef.current && audio.src === audioRef.current.src) {
+            audioRef.current.load();
+          }
+        }, 1000);
+      }
     };
     
     const handleCanPlay = () => {
       console.log(`[Audio] 音频可以播放了`);
-      setAudioLoading(false);
+      // 只有当缓冲足够时才标记为加载完成
+      if (audio.buffered && audio.buffered.length > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        const bufferedPercent = (bufferedEnd / audio.duration) * 100;
+        console.log(`[Audio] 当前缓冲进度: ${bufferedPercent.toFixed(1)}%`);
+        // 如果缓冲超过10%才标记为加载完成
+        if (bufferedPercent >= 10 || audio.duration < 30) {
+          setAudioLoading(false);
+        }
+      } else {
+        setAudioLoading(false);
+      }
     };
 
     const handleProgress = () => {
@@ -1239,7 +1259,11 @@ export default function App() {
     const handleStalled = () => {
       console.warn(`[Audio] 音频播放停滞，正在重新缓冲`);
       // 播放过程中不显示加载状态，只在初始加载时显示
-      // setAudioLoading(true);
+      // 尝试恢复播放
+      if (isPlaying && audioRef.current) {
+        console.log(`[Audio] 尝试恢复播放`);
+        audioRef.current.play().catch(e => console.warn('[Audio] 恢复播放失败:', e));
+      }
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);

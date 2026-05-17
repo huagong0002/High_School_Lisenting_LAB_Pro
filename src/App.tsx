@@ -243,6 +243,36 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [materials, user]);
 
+  // 预加载材料列表中的音频
+  useEffect(() => {
+    if (!user || materials.length === 0) return;
+    
+    // 获取所有有音频URL的材料
+    const materialsWithAudio = materials.filter(m => m.audioUrl);
+    
+    if (materialsWithAudio.length > 0) {
+      console.log(`[Audio] 开始预加载 ${materialsWithAudio.length} 个音频文件`);
+      
+      // 优先预加载当前选中的材料
+      if (currentMaterialId) {
+        const currentMat = materialsWithAudio.find(m => m.id === currentMaterialId);
+        if (currentMat) {
+          preloadAudio(currentMat.audioUrl!);
+        }
+      }
+      
+      // 预加载其他材料（延迟执行，避免阻塞）
+      setTimeout(() => {
+        materialsWithAudio.forEach((mat, index) => {
+          if (mat.id !== currentMaterialId) {
+            // 错开预加载时间，避免同时发起太多请求
+            setTimeout(() => preloadAudio(mat.audioUrl!), index * 500);
+          }
+        });
+      }, 1000);
+    }
+  }, [materials, currentMaterialId, preloadAudio]);
+
   // Sync current material changes back to local materials list
   useEffect(() => {
     if (!material) return;
@@ -352,6 +382,7 @@ export default function App() {
   const [duration, setDuration] = useState(0);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [bufferProgress, setBufferProgress] = useState(0); // 缓冲进度 0-100
   
   // 使用ref存储最新的audioUrl，解决闭包问题
   const latestAudioUrlRef = useRef<string | undefined>(material.audioUrl);
@@ -377,6 +408,44 @@ export default function App() {
 
   // 音频元数据缓存，只缓存时长信息，避免缓存整个音频元素
 const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean }>>(new Map());
+
+// 预加载音频的辅助函数
+const preloadAudio = useCallback((audioUrl: string) => {
+  if (!audioUrl || audioMetadataCache.current.has(audioUrl)) {
+    return; // 已经缓存或URL为空
+  }
+  
+  console.log(`[Audio] 开始预加载音频: ${audioUrl}`);
+  
+  const tempAudio = new Audio(audioUrl);
+  tempAudio.crossOrigin = 'anonymous';
+  tempAudio.preload = 'auto';
+  
+  tempAudio.addEventListener('loadedmetadata', () => {
+    audioMetadataCache.current.set(audioUrl, {
+      duration: tempAudio.duration,
+      ready: true
+    });
+    console.log(`[Audio] 预加载完成，时长: ${tempAudio.duration}s`);
+    // 释放临时音频对象
+    tempAudio.src = '';
+  });
+  
+  tempAudio.addEventListener('error', () => {
+    console.warn(`[Audio] 预加载失败: ${audioUrl}`);
+    tempAudio.src = '';
+  });
+  
+  // 设置超时，避免长时间等待
+  setTimeout(() => {
+    if (!audioMetadataCache.current.get(audioUrl)?.ready) {
+      console.log(`[Audio] 预加载超时: ${audioUrl}`);
+      tempAudio.src = '';
+    }
+  }, 10000);
+  
+  tempAudio.load();
+}, []);
 
 // 监听currentMaterialId变化，确保音频正确加载
   useEffect(() => {
@@ -900,14 +969,69 @@ const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean
   };
 
   // Playback Control
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
+  const togglePlay = async () => {
+    if (!audioRef.current) return;
+    
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      // 检查缓冲状态，如果缓冲不足则等待
+      const audio = audioRef.current;
+      if (audio.buffered.length > 0 && audio.duration > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        const bufferAhead = bufferedEnd - audio.currentTime;
+        
+        console.log(`[Audio] 准备播放，缓冲超前: ${bufferAhead.toFixed(2)}s`);
+        
+        // 如果缓冲不足2秒，等待更多缓冲
+        if (bufferAhead < 2 && bufferProgress < 100) {
+          console.log(`[Audio] 缓冲不足，等待更多缓冲...`);
+          setAudioLoading(true);
+          
+          // 设置一个合理的超时
+          const maxWaitTime = 5000; // 最多等待5秒
+          const startTime = Date.now();
+          
+          // 等待缓冲足够或超时
+          await new Promise<void>((resolve) => {
+            const checkBuffer = () => {
+              if (Date.now() - startTime >= maxWaitTime) {
+                console.log(`[Audio] 缓冲等待超时，尝试播放`);
+                resolve();
+                return;
+              }
+              
+              if (audio.buffered.length > 0) {
+                const newBufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+                const newBufferAhead = newBufferedEnd - audio.currentTime;
+                
+                if (newBufferAhead >= 2 || bufferProgress >= 100) {
+                  console.log(`[Audio] 缓冲足够，开始播放`);
+                  resolve();
+                  return;
+                }
+              }
+              
+              setTimeout(checkBuffer, 100);
+            };
+            
+            checkBuffer();
+          });
+          
+          setAudioLoading(false);
+        }
       }
-      setIsPlaying(!isPlaying);
+      
+      // 尝试播放，添加错误处理
+      try {
+        await audio.play();
+        setIsPlaying(true);
+        console.log(`[Audio] 播放成功`);
+      } catch (e) {
+        console.error(`[Audio] 播放失败:`, e);
+        setAudioError('播放失败，请重试');
+      }
     }
   };
 
@@ -1017,11 +1141,40 @@ const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean
       setAudioLoading(false);
     };
 
+    const handleProgress = () => {
+      if (audio.buffered.length > 0 && audio.duration > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        const progress = (bufferedEnd / audio.duration) * 100;
+        setBufferProgress(Math.min(progress, 100));
+        console.log(`[Audio] 缓冲进度: ${progress.toFixed(1)}%`);
+      }
+    };
+
+    const handleWaiting = () => {
+      console.log(`[Audio] 等待缓冲...`);
+      setAudioLoading(true);
+    };
+
+    const handleCanPlayThrough = () => {
+      console.log(`[Audio] 音频可以流畅播放`);
+      setAudioLoading(false);
+      setBufferProgress(100);
+    };
+
+    const handleStalled = () => {
+      console.warn(`[Audio] 音频播放停滞，正在重新缓冲`);
+      setAudioLoading(true);
+    };
+
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('error', handleError);
     audio.addEventListener('abort', handleAbort);
     audio.addEventListener('canplay', handleCanPlay);
+    audio.addEventListener('progress', handleProgress);
+    audio.addEventListener('waiting', handleWaiting);
+    audio.addEventListener('canplaythrough', handleCanPlayThrough);
+    audio.addEventListener('stalled', handleStalled);
     audio.addEventListener('play', () => setIsPlaying(true));
     audio.addEventListener('pause', () => setIsPlaying(false));
 
@@ -1031,6 +1184,10 @@ const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean
       audio.removeEventListener('error', handleError);
       audio.removeEventListener('abort', handleAbort);
       audio.removeEventListener('canplay', handleCanPlay);
+      audio.removeEventListener('progress', handleProgress);
+      audio.removeEventListener('waiting', handleWaiting);
+      audio.removeEventListener('canplaythrough', handleCanPlayThrough);
+      audio.removeEventListener('stalled', handleStalled);
     };
   }, [material.segments, mode, activeSegmentIndex]);
 
@@ -2179,9 +2336,13 @@ const audioMetadataCache = useRef<Map<string, { duration: number; ready: boolean
       <audio 
         ref={audioRef}
         src={material.audioUrl || undefined}
-        preload="metadata"
+        preload="auto"
         playsInline
         crossOrigin="anonymous"
+        autoPlay={false}
+        loop={false}
+        controls={false}
+        disableRemotePlayback
       />
 
       <style>{`

@@ -189,6 +189,11 @@ export default function App() {
   useEffect(() => {
     if (!material || !material.id || !user) return;
     
+    // 只保存有实际内容的材料（避免保存默认的空材料）
+    if (material.title === '未命名听力材料' && !material.audioUrl && material.segments.length === 0 && !material.script) {
+      return;
+    }
+    
     console.log(`[AutoSave] 材料变化，自动保存中... ID: ${material.id}`);
     
     // Save to localStorage immediately (不更新materials状态，避免触发无限循环)
@@ -227,8 +232,22 @@ export default function App() {
     }
     
     console.log(`[MaterialSwitch] 切换到材料: ${active.id}`);
+    // 保存当前播放位置和状态
+    const currentTime = audioRef.current?.currentTime || 0;
+    const wasPlaying = audioRef.current?.paused === false;
+    
     setMaterial(active);
     localStorage.setItem('echomaster_current_id', currentMaterialId);
+    
+    // 恢复播放位置和状态
+    setTimeout(() => {
+      if (audioRef.current) {
+        audioRef.current.currentTime = currentTime;
+        if (wasPlaying && isPlaying) {
+          audioRef.current.play().catch(e => console.warn('[Audio] 恢复播放失败:', e));
+        }
+      }
+    }, 100);
   }, [currentMaterialId, materials]);
 
   // Debug: Check Backend Health
@@ -606,7 +625,8 @@ export default function App() {
       if (document.hidden) {
         console.log('[App] 页面隐藏');
         // 页面隐藏时，保存当前材料到localStorage，但不停止音频
-        if (material && material.id) {
+        // 只保存有实际内容的材料（避免保存默认的空材料）
+        if (material && material.id && (material.title !== '未命名听力材料' || material.audioUrl || material.segments.length > 0 || material.script)) {
           const libraryKey = `echomaster_library_shared`;
           const savedLibrary = localStorage.getItem(libraryKey);
           let currentLibrary = savedLibrary ? JSON.parse(savedLibrary) : [];
@@ -620,11 +640,15 @@ export default function App() {
         }
       } else {
         console.log('[App] 页面显示');
-        // 页面重新显示时，恢复播放状态
-        if (isPlaying && audioRef.current) {
+        // 页面重新显示时，恢复播放状态（不触发材料切换）
+        if (isPlaying && audioRef.current && !audioRef.current.paused) {
+          // 音频已经在播放中，不需要恢复
+        } else if (isPlaying && audioRef.current) {
+          // 音频被暂停了，尝试恢复播放
           audioRef.current.play().catch(e => console.warn('[Audio] 恢复播放失败:', e));
         }
-        // 仅在材料列表为空时才刷新
+        // 页面显示时不再自动刷新材料库，避免中断播放
+        // 只有在材料列表为空或当前材料无效时才刷新
         if (user && (!materials || materials.length === 0)) {
           fetchLibrary();
         }

@@ -1156,9 +1156,21 @@ export default function App() {
     if (audioRef.current) audioRef.current.currentTime = 0;
   };
 
+  // 音频重试计数器（使用ref避免闭包问题）
+  const audioRetryCount = useRef(0);
+  const maxAudioRetries = 3;
+  // 缓冲监控
+  const lastBufferedProgress = useRef(0);
+  const noProgressStartTime = useRef<number | null>(null);
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+
+    // 重置重试计数器和缓冲监控
+    audioRetryCount.current = 0;
+    lastBufferedProgress.current = 0;
+    noProgressStartTime.current = null;
 
     const handleTimeUpdate = () => {
       setCurrentTime(audio.currentTime);
@@ -1200,8 +1212,17 @@ export default function App() {
       setAudioLoading(false);
       // 如果是 blob URL，不要尝试重新加载（会触发安全错误）
       if (target.src && !target.src.startsWith('blob:')) {
-        console.log(`[Audio] 尝试重新加载音频: ${target.src}`);
-        target.load();
+        audioRetryCount.current++;
+        if (audioRetryCount.current <= maxAudioRetries) {
+          console.log(`[Audio] 尝试重新加载音频 (第 ${audioRetryCount.current}/${maxAudioRetries} 次): ${target.src}`);
+          setTimeout(() => {
+            if (audioRef.current && target.src === audioRef.current.src) {
+              audioRef.current.load();
+            }
+          }, audioRetryCount.current * 2000); // 指数退避
+        } else {
+          console.error(`[Audio] 音频加载失败，已达到最大重试次数 ${maxAudioRetries}`);
+        }
       }
     };
 
@@ -1210,12 +1231,18 @@ export default function App() {
       setAudioLoading(false);
       // 尝试重新加载音频（如果不是blob URL）
       if (audio.src && !audio.src.startsWith('blob:')) {
-        console.log(`[Audio] 尝试重新加载被中止的音频: ${audio.src}`);
-        setTimeout(() => {
-          if (audioRef.current && audio.src === audioRef.current.src) {
-            audioRef.current.load();
-          }
-        }, 1000);
+        audioRetryCount.current++;
+        if (audioRetryCount.current <= maxAudioRetries) {
+          console.log(`[Audio] 尝试重新加载被中止的音频 (第 ${audioRetryCount.current}/${maxAudioRetries} 次): ${audio.src}`);
+          setTimeout(() => {
+            if (audioRef.current && audio.src === audioRef.current.src) {
+              audioRef.current.load();
+            }
+          }, audioRetryCount.current * 2000); // 指数退避
+        } else {
+          console.error(`[Audio] 音频加载失败，已达到最大重试次数 ${maxAudioRetries}`);
+          setAudioError('音频加载失败，请检查网络连接或稍后重试');
+        }
       }
     };
     
@@ -1241,6 +1268,30 @@ export default function App() {
         const progress = (bufferedEnd / audio.duration) * 100;
         setBufferProgress(Math.min(progress, 100));
         console.log(`[Audio] 缓冲进度: ${progress.toFixed(1)}%`);
+        
+        // 检测缓冲停滞
+        if (progress === lastBufferedProgress.current) {
+          if (!noProgressStartTime.current) {
+            noProgressStartTime.current = Date.now();
+          } else {
+            const noProgressDuration = Date.now() - noProgressStartTime.current;
+            // 如果缓冲超过10秒没有进展，尝试重新加载
+            if (noProgressDuration > 10000 && audioRetryCount.current <= maxAudioRetries) {
+              console.warn(`[Audio] 缓冲停滞超过10秒，尝试重新加载`);
+              audioRetryCount.current++;
+              setTimeout(() => {
+                if (audioRef.current && audio.src === audioRef.current.src) {
+                  audioRef.current.load();
+                }
+              }, 1000);
+              noProgressStartTime.current = null;
+            }
+          }
+        } else {
+          // 缓冲有进展，重置计时器
+          lastBufferedProgress.current = progress;
+          noProgressStartTime.current = null;
+        }
       }
     };
 

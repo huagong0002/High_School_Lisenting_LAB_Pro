@@ -367,8 +367,13 @@ export default function App() {
           credentials: API_BASE ? 'include' : 'same-origin'
         });
         if (response.ok) {
-          setMaterials(prev => prev.filter(m => m.id !== id));
+          // 更新本地状态
+          const updated = materials.filter(m => m.id !== id);
+          setMaterials(updated);
+          // 更新localStorage，防止刷新后又出现
+          localStorage.setItem(`echomaster_library_shared`, JSON.stringify(updated));
           if (currentMaterialId === id) setCurrentMaterialId(null);
+          console.log(`[Delete] 材料 ${id} 已删除并同步到localStorage`);
         } else {
           const err = await response.json();
           alert(err.error || '删除失败');
@@ -596,27 +601,30 @@ export default function App() {
     const savedId = localStorage.getItem('echomaster_current_id');
     if (savedId && !currentMaterialId) setCurrentMaterialId(savedId);
     
-    // Handle visibility change to refresh UI
+    // Handle visibility change - don't pause audio on hidden
     const handleVisibilityChange = () => {
       if (document.hidden) {
         console.log('[App] 页面隐藏');
-        // 页面隐藏时，保存当前材料到localStorage
+        // 页面隐藏时，保存当前材料到localStorage，但不停止音频
         if (material && material.id) {
-          setMaterials(prev => {
-            const existingIndex = prev.findIndex(m => m.id === material.id);
-            let updated = prev;
-            if (existingIndex >= 0) {
-              updated = prev.map(m => m.id === material.id ? material : m);
-            } else {
-              updated = [...prev, material];
-            }
-            localStorage.setItem(`echomaster_library_shared`, JSON.stringify(updated));
-            return updated;
-          });
+          const libraryKey = `echomaster_library_shared`;
+          const savedLibrary = localStorage.getItem(libraryKey);
+          let currentLibrary = savedLibrary ? JSON.parse(savedLibrary) : [];
+          const existingIndex = currentLibrary.findIndex((m: any) => m.id === material.id);
+          if (existingIndex >= 0) {
+            currentLibrary[existingIndex] = material;
+          } else {
+            currentLibrary.push(material);
+          }
+          localStorage.setItem(libraryKey, JSON.stringify(currentLibrary));
         }
       } else {
         console.log('[App] 页面显示');
-        // 页面重新显示时，仅在材料列表为空时才刷新
+        // 页面重新显示时，恢复播放状态
+        if (isPlaying && audioRef.current) {
+          audioRef.current.play().catch(e => console.warn('[Audio] 恢复播放失败:', e));
+        }
+        // 仅在材料列表为空时才刷新
         if (user && (!materials || materials.length === 0)) {
           fetchLibrary();
         }

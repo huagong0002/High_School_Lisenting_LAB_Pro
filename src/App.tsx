@@ -21,7 +21,19 @@ console.log(`[API Config] Target Base: "${API_BASE || 'Relative'}"`);
 import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = 'https://erskfzsqaqlrwvmtwzds.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVyc2tmenNxYXFscnd2bXR3emRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4MDYwNzksImV4cCI6MjA5MzM4MjA3OX0.zeI1tFI2nMZi7Dud1qHMl-H2PE27uD1ZMttZS-rbduQ';
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  // 增加超时时间，支持大文件上传
+  fetchOptions: {
+    timeout: 300000, // 5分钟超时
+  },
+  // 存储配置
+  storage: {
+    retry: {
+      maxRetries: 3,
+      maxDelay: 5000,
+    },
+  },
+});
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { 
@@ -638,54 +650,78 @@ export default function App() {
       }, 2000);
       
       // 直接上传到Supabase Storage（绕过Vercel限制）
-            const { data, error } = await supabaseClient
-              .storage
-              .from('audio-files')
-              .upload(safeFileName, file, {
-                contentType: file.type,
-                upsert: true,
-                // 上传进度回调 - 优化进度更新
-                onUploadProgress: (progress) => {
-                  const percentage = Math.round((progress.loaded / progress.total) * 100);
-                  lastProgress = percentage;
-                  // 只在进度变化时更新，避免频繁重渲染
-                  setUploadProgress(prev => {
-                    const current = prev[uploadKey];
-                    if (!current || current.progress !== percentage) {
-                      return { ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } };
-                    }
-                    return prev;
-                  });
-                  console.log(`[Upload] 进度: ${percentage}% (${progress.loaded}/${progress.total})`);
-                }
-              });
-            
-            // 立即更新进度到100%
-            setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'uploading' } }));
-            clearInterval(progressInterval);
+      let uploadResult;
+      let uploadError;
+      const maxRetries = 2;
+      let retryCount = 0;
       
-      if (error) {
-        console.error('[Upload] 上传错误:', error);
-        console.error('[Upload] 错误详情:', JSON.stringify(error, null, 2));
+      while (retryCount <= maxRetries) {
+        try {
+          console.log(`[Upload] 尝试上传 (第 ${retryCount + 1} 次)`);
+          uploadResult = await supabaseClient
+            .storage
+            .from('audio-files')
+            .upload(safeFileName, file, {
+              contentType: file.type,
+              upsert: true,
+              // 上传进度回调 - 优化进度更新
+              onUploadProgress: (progress) => {
+                const percentage = Math.round((progress.loaded / progress.total) * 100);
+                lastProgress = percentage;
+                // 只在进度变化时更新，避免频繁重渲染
+                setUploadProgress(prev => {
+                  const current = prev[uploadKey];
+                  if (!current || current.progress !== percentage) {
+                    return { ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } };
+                  }
+                  return prev;
+                });
+                console.log(`[Upload] 进度: ${percentage}% (${progress.loaded}/${progress.total})`);
+              }
+            });
+          uploadError = uploadResult.error;
+          if (!uploadError) break; // 上传成功，退出重试循环
+        } catch (e: any) {
+          console.error(`[Upload] 上传异常 (第 ${retryCount + 1} 次):`, e);
+          uploadError = { name: 'UploadException', message: e.message };
+        }
+        
+        retryCount++;
+        if (retryCount <= maxRetries) {
+          const delay = Math.pow(2, retryCount) * 1000; // 指数退避
+          console.log(`[Upload] 重试等待 ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+      
+      // 立即更新进度到100%
+      setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'uploading' } }));
+      clearInterval(progressInterval);
+      
+      if (uploadError) {
+        console.error('[Upload] 上传错误:', uploadError);
+        console.error('[Upload] 错误详情:', JSON.stringify(uploadError, null, 2));
         setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 0, status: 'error' } }));
         
         let errorMsg = '上传失败';
-        if (error.message) {
-          if (error.message.includes('CORS')) {
+        if (uploadError.message) {
+          if (uploadError.message.includes('CORS') || uploadError.message.includes('cors')) {
             errorMsg = '跨域配置错误，请检查 Supabase CORS 设置';
-          } else if (error.message.includes('permission')) {
+          } else if (uploadError.message.includes('permission') || uploadError.message.includes('Permission')) {
             errorMsg = '权限不足，请检查存储桶权限设置';
-          } else if (error.message.includes('network')) {
-            errorMsg = '网络连接失败，请检查网络';
+          } else if (uploadError.message.includes('network') || uploadError.message.includes('Network')) {
+            errorMsg = '网络连接失败，请检查网络后重试';
+          } else if (uploadError.message.includes('Failed to fetch')) {
+            errorMsg = '网络请求失败，请检查网络连接或稍后重试';
           } else {
-            errorMsg = `上传失败: ${error.message}`;
+            errorMsg = `上传失败: ${uploadError.message}`;
           }
         }
         alert(errorMsg);
         return null;
       }
       
-      console.log('[Upload] 文件上传成功:', data);
+      console.log('[Upload] 文件上传成功:', uploadResult.data);
       
       // 获取公共访问 URL
       const { data: urlData, error: urlError } = supabaseClient

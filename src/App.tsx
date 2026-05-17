@@ -1687,16 +1687,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="pt-2">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-3">听力全文本 (可选，用于快速分段)</label>
-                    <textarea 
-                      value={material.script}
-                      onChange={(e) => setMaterial(prev => ({ ...prev, script: e.target.value }))}
-                      placeholder="在此处输入带时间戳的原文，例如：[00:01] Section A..."
-                      className="w-full h-40 bg-white/5 border border-white/10 rounded-2xl p-5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 transition-all resize-none"
-                    />
-                  </div>
-
                   <div className="pt-4 space-y-3">
                     <button 
                       disabled={!material.audioUrl}
@@ -1937,7 +1927,7 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           <BookOpen size={20} className="text-blue-400" />
                           <div className="flex flex-col">
-                            <h3 className="font-bold text-white tracking-tight">脚本编辑 (2/3)</h3>
+                            <h3 className="font-bold text-white tracking-tight">脚本编辑</h3>
                             <span className="text-[10px] text-slate-500 uppercase tracking-widest font-black">EDITING: {material.segments[editingSegmentIndex].label}</span>
                           </div>
                         </div>

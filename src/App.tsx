@@ -54,7 +54,6 @@ import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { AudioSegment, ListeningMaterial, User as UserType } from './types';
-import { mockMaterials, mockUser } from './mockData';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -123,21 +122,7 @@ export default function App() {
     if (!user) return;
     try {
       setLastSaved('正在同步...');
-      
-      // 本地开发环境使用模拟数据（localhost或AI Studio环境）
-      const isLocal = typeof window !== 'undefined' && 
-        (window.location.hostname.includes('localhost') || 
-         window.location.hostname.includes('127.0.0.1') ||
-         window.location.hostname.includes('.run.app'));
-      
-      if (isLocal) {
-        console.log('[Mock Data] 使用模拟数据');
-        setMaterials(mockMaterials);
-        setLastSaved('本地测试数据');
-        return;
-      }
-      
-      // 生产环境获取真实数据（不按用户ID过滤）
+      // 获取所有共享材料（不按用户ID过滤）
       const response = await fetch(`${API_BASE}/api/materials`, {
         mode: 'cors',
         credentials: API_BASE ? 'include' : 'same-origin'
@@ -198,13 +183,9 @@ export default function App() {
   const handleImmediateSave = async () => {
     if (!material || !user) return;
     
-    // 使用ref获取最新的audioUrl，避免闭包问题导致保存旧的blob URL
-    const currentAudioUrl = latestAudioUrlRef.current || material.audioUrl;
-    
-    // 1. First sync current material to the list with the latest audioUrl
-    const updatedMaterial = { ...material, audioUrl: currentAudioUrl, lastModified: Date.now() };
+    // 1. First sync current material to the list
     const updatedMaterials = materials.map(m => 
-      m.id === material.id ? updatedMaterial : m
+      m.id === material.id ? { ...material, lastModified: Date.now() } : m
     );
     setMaterials(updatedMaterials);
     
@@ -230,21 +211,17 @@ export default function App() {
         const index = prev.findIndex(m => m.id === material.id);
         if (index === -1) return prev;
         
-        // 使用ref获取最新的audioUrl，避免闭包问题
-        const currentAudioUrl = latestAudioUrlRef.current || material.audioUrl;
-        
         // Only update if content actually changed to avoid redundant re-renders
         const existing = prev[index];
-        const materialWithLatestUrl = { ...material, audioUrl: currentAudioUrl };
         const { lastModified: _old, ...restExisting } = existing;
-        const { lastModified: _new, ...restCurrent } = materialWithLatestUrl;
+        const { lastModified: _new, ...restCurrent } = material;
         
         if (JSON.stringify(restExisting) === JSON.stringify(restCurrent)) {
           return prev;
         }
         
         const newList = [...prev];
-        newList[index] = { ...materialWithLatestUrl, lastModified: Date.now() };
+        newList[index] = { ...material, lastModified: Date.now() };
         return newList;
       });
       setLastSaved(new Date().toLocaleTimeString());
@@ -344,7 +321,14 @@ export default function App() {
   useEffect(() => {
     if (audioRef.current && material.audioUrl) {
       console.log(`[Audio] 重新加载音频: ${material.audioUrl}`);
-      audioRef.current.load();
+      audioRef.current.pause();
+      setIsPlaying(false);
+      // 等待下一帧再加载，避免播放冲突
+      requestAnimationFrame(() => {
+        if (audioRef.current) {
+          audioRef.current.load();
+        }
+      });
     }
   }, [material.audioUrl]);
 
@@ -353,30 +337,21 @@ export default function App() {
     if (currentMaterialId && audioRef.current && material.audioUrl) {
       console.log(`[Audio] 材料切换，重新加载音频: ${material.audioUrl}`);
       audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current.load();
       setIsPlaying(false);
       setCurrentTime(0);
+      // 等待下一帧再加载，避免播放冲突
+      requestAnimationFrame(() => {
+        if (audioRef.current) {
+          audioRef.current.currentTime = 0;
+          audioRef.current.load();
+        }
+      });
     }
   }, [currentMaterialId]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
-    
-    // 本地开发环境使用模拟登录
-    const isLocal = typeof window !== 'undefined' && 
-      (window.location.hostname.includes('localhost') || 
-       window.location.hostname.includes('127.0.0.1') ||
-       window.location.hostname.includes('.run.app'));
-    
-    if (isLocal) {
-      console.log('[Mock Login] 本地开发环境，使用模拟用户登录');
-      setUser(mockUser);
-      localStorage.setItem('echomaster_user', JSON.stringify(mockUser));
-      return;
-    }
-    
     const timestamp = Date.now();
     const apiUrl = `${API_BASE}/api/login?t=${timestamp}`;
     console.log(`--- Attempting Login ---`);
@@ -669,16 +644,23 @@ export default function App() {
               .upload(safeFileName, file, {
                 contentType: file.type,
                 upsert: true,
-                // 上传进度回调
+                // 上传进度回调 - 优化进度更新
                 onUploadProgress: (progress) => {
                   const percentage = Math.round((progress.loaded / progress.total) * 100);
                   lastProgress = percentage;
-                  setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } }));
+                  // 只在进度变化时更新，避免频繁重渲染
+                  setUploadProgress(prev => {
+                    const current = prev[uploadKey];
+                    if (!current || current.progress !== percentage) {
+                      return { ...prev, [uploadKey]: { progress: percentage, status: 'uploading' } };
+                    }
+                    return prev;
+                  });
                   console.log(`[Upload] 进度: ${percentage}% (${progress.loaded}/${progress.total})`);
                 }
               });
             
-            // 强制更新进度到100%
+            // 立即更新进度到100%
             setUploadProgress(prev => ({ ...prev, [uploadKey]: { progress: 100, status: 'uploading' } }));
             clearInterval(progressInterval);
       
@@ -2007,6 +1989,9 @@ export default function App() {
       <audio 
         ref={audioRef}
         src={material.audioUrl || undefined}
+        preload="metadata"
+        playsInline
+        crossOrigin="anonymous"
       />
 
       <style>{`

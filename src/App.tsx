@@ -2284,13 +2284,8 @@ export default function App() {
                     </h3>
                     <div className="space-y-2 overflow-y-auto max-h-[500px] pr-2 custom-scrollbar">
                       {Array.isArray(material.segments) && material.segments.map((seg, idx) => (
-                        <button 
+                        <div 
                           key={seg.id}
-                          onClick={() => {
-                            if (audioRef.current) audioRef.current.currentTime = seg.startTime;
-                            setIsPlaying(true);
-                            audioRef.current?.play();
-                          }}
                           className={cn(
                             "w-full px-5 py-4 rounded-2xl flex items-center justify-between border transition-all text-left text-sm group",
                             activeSegmentIndex === idx 
@@ -2299,6 +2294,34 @@ export default function App() {
                           )}
                         >
                           <div className="flex items-center gap-3">
+                            {/* 播放暂停按钮 */}
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // 如果当前正在播放这个分段，就暂停；否则跳转到这个分段并播放
+                                if (activeSegmentIndex === idx && isPlaying) {
+                                  togglePlay();
+                                } else {
+                                  if (audioRef.current) audioRef.current.currentTime = seg.startTime;
+                                  if (!isPlaying) {
+                                    setIsPlaying(true);
+                                    audioRef.current?.play();
+                                  }
+                                }
+                              }}
+                              className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                              style={{
+                                backgroundColor: activeSegmentIndex === idx ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.05)',
+                                color: activeSegmentIndex === idx ? '#3b82f6' : '#64748b'
+                              }}
+                              title={activeSegmentIndex === idx && isPlaying ? "暂停" : "播放此分段"}
+                            >
+                              {activeSegmentIndex === idx && isPlaying ? (
+                                <Pause size={14} />
+                              ) : (
+                                <Play size={14} className="translate-x-0.5" />
+                              )}
+                            </button>
                             <span className={cn(
                               "w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold",
                               activeSegmentIndex === idx ? "bg-blue-500 text-white" : "bg-white/10 text-slate-500"
@@ -2306,7 +2329,7 @@ export default function App() {
                             <span className="font-bold">{seg.label}</span>
                           </div>
                           <span className="text-[10px] font-mono opacity-50">{formatTime(seg.startTime)}</span>
-                        </button>
+                        </div>
                       ))}
                     </div>
                   </div>
